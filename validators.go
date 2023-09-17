@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"math/big"
 	"net/http"
 	"sort"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cosmos/cosmos-sdk/simapp"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
@@ -15,7 +17,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
-	"math/big"
 )
 
 func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
@@ -227,16 +228,18 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 				Str("address", validator.OperatorAddress).
 				Msg("Could not parse delegator tokens")
 		} else {
+			// Ensure that the 'moniker' string contains only valid UTF-8 characters.
+			moniker := sanitizeUTF8(validator.Description.Moniker)
 			tokensFloatVal, _ := tokensFloat.Float64()
 			validatorsTokensGauge.With(prometheus.Labels{
 				"address": validator.OperatorAddress,
-				"moniker": validator.Description.Moniker,
+				"moniker": moniker,
 				"denom":   Denom,
 			}).Set(tokensFloatVal)
 
 			validatorsStatusGauge.With(prometheus.Labels{
 				"address": validator.OperatorAddress,
-				"moniker": validator.Description.Moniker,
+				"moniker": moniker,
 			}).Set(float64(validator.Status))
 
 			// golang doesn't have a ternary operator, so we have to stick with this ugly solution
@@ -249,7 +252,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 			}
 			validatorsJailedGauge.With(prometheus.Labels{
 				"address": validator.OperatorAddress,
-				"moniker": validator.Description.Moniker,
+				"moniker": moniker,
 			}).Set(jailed)
 
 			// Замените преобразование Decimal в Float на использование math/big.Float
@@ -265,7 +268,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 				delegatorSharesFloatVal, _ := delegatorSharesFloat.Float64()
 				validatorsDelegatorSharesGauge.With(prometheus.Labels{
 					"address": validator.OperatorAddress,
-					"moniker": validator.Description.Moniker,
+					"moniker": moniker,
 					"denom":   Denom,
 				}).Set(delegatorSharesFloatVal)
 
@@ -282,7 +285,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 					minSelfDelegationFloatVal, _ := minSelfDelegationFloat.Float64()
 					validatorsMinSelfDelegationGauge.With(prometheus.Labels{
 						"address": validator.OperatorAddress,
-						"moniker": validator.Description.Moniker,
+						"moniker": moniker,
 						"denom":   Denom,
 					}).Set(minSelfDelegationFloatVal)
 
@@ -291,7 +294,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 						sublogger.Error().
 							Str("address", validator.OperatorAddress).
 							Err(err).
-							Msg("Could not get unpack validator inferfaces")
+							Msg("Could not get unpack validator interfaces")
 					}
 
 					pubKey, err := validator.GetConsAddr()
@@ -323,7 +326,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 					if validator.Status == stakingtypes.Bonded {
 						validatorsMissedBlocksGauge.With(prometheus.Labels{
 							"address": validator.OperatorAddress,
-							"moniker": validator.Description.Moniker,
+							"moniker": moniker,
 						}).Set(float64(signingInfo.MissedBlocksCounter))
 					} else {
 						sublogger.Trace().
@@ -333,7 +336,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 
 					validatorsRankGauge.With(prometheus.Labels{
 						"address": validator.OperatorAddress,
-						"moniker": validator.Description.Moniker,
+						"moniker": moniker,
 					}).Set(float64(index + 1))
 
 					if validatorSetLength != 0 {
@@ -348,19 +351,30 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 
 						validatorsIsActiveGauge.With(prometheus.Labels{
 							"address": validator.OperatorAddress,
-							"moniker": validator.Description.Moniker,
+							"moniker": moniker,
 						}).Set(active)
 					}
 				}
-
-				h := promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
-				h.ServeHTTP(w, r)
-				sublogger.Info().
-					Str("method", "GET").
-					Str("endpoint", "/metrics/validators").
-					Float64("request-time", time.Since(requestStart).Seconds()).
-					Msg("Request processed")
 			}
 		}
 	}
+
+	h := promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
+	h.ServeHTTP(w, r)
+	sublogger.Info().
+		Str("method", "GET").
+		Str("endpoint", "/metrics/validators").
+		Float64("request-time", time.Since(requestStart).Seconds()).
+		Msg("Request processed")
+}
+
+// Определите функцию для очистки строки от недопустимых символов UTF-8.
+func sanitizeUTF8(input string) string {
+	result := ""
+	for _, runeValue := range input {
+		if utf8.ValidRune(runeValue) {
+			result += string(runeValue)
+		}
+	}
+	return result
 }
