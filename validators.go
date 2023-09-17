@@ -371,11 +371,11 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 
 // Определите функцию для очистки строки от недопустимых символов UTF-8.
 func sanitizeUTF8(input string) string {
-	result := ""
+	result := make([]rune, 0, len(input))
 	for _, runeValue := range input {
 		if utf8.ValidRune(runeValue) {
-			result += string(runeValue)
+			result = append(result, runeValue)
 		}
 	}
-	return result
+	return string(result)
 }
