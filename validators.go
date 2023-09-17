@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"math/big"
 	"net/http"
@@ -371,11 +372,11 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 
 // Определите функцию для очистки строки от недопустимых символов UTF-8.
 func sanitizeUTF8(input string) string {
-	result := make([]rune, 0, len(input))
+	buf := &bytes.Buffer{}
 	for _, runeValue := range input {
 		if utf8.ValidRune(runeValue) {
-			result = append(result, runeValue)
+			buf.WriteRune(runeValue)
 		}
 	}
-	return string(result)
+	return buf.String()
 }
