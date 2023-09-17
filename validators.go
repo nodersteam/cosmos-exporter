@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
+	"math/big"
 )
 
 func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
@@ -217,152 +217,150 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		Msg("Validators info")
 
 	for index, validator := range validators {
-		// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
-		rate, err := strconv.ParseFloat(validator.Commission.CommissionRates.Rate.String(), 64)
+		// Замените преобразование Decimal в Float на использование math/big.Float
+		tokensFloat := new(big.Float)
+		tokensFloat, _, err := tokensFloat.Parse(validator.Tokens.String(), 10)
+
 		if err != nil {
 			log.Error().
 				Err(err).
 				Str("address", validator.OperatorAddress).
-				Msg("Could not get commission")
-		} else {
-			validatorsCommissionGauge.With(prometheus.Labels{
-				"address": validator.OperatorAddress,
-				"moniker": validator.Description.Moniker,
-			}).Set(rate)
-		}
-
-		validatorsStatusGauge.With(prometheus.Labels{
-			"address": validator.OperatorAddress,
-			"moniker": validator.Description.Moniker,
-		}).Set(float64(validator.Status))
-
-		// golang doesn't have a ternary operator, so we have to stick with this ugly solution
-		var jailed float64
-
-		if validator.Jailed {
-			jailed = 1
-		} else {
-			jailed = 0
-		}
-		validatorsJailedGauge.With(prometheus.Labels{
-			"address": validator.OperatorAddress,
-			"moniker": validator.Description.Moniker,
-		}).Set(jailed)
-
-		// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
-		if value, err := strconv.ParseFloat(validator.Tokens.String(), 64); err != nil {
-			sublogger.Error().
-				Str("address", validator.OperatorAddress).
-				Err(err).
 				Msg("Could not parse delegator tokens")
 		} else {
+			tokensFloatVal, _ := tokensFloat.Float64()
 			validatorsTokensGauge.With(prometheus.Labels{
 				"address": validator.OperatorAddress,
 				"moniker": validator.Description.Moniker,
 				"denom":   Denom,
-			}).Set(value / DenomCoefficient) // a better way to do this is using math/big Div then checking IsInt64
-		}
+			}).Set(tokensFloatVal)
 
-		// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
-		if value, err := strconv.ParseFloat(validator.DelegatorShares.String(), 64); err != nil {
-			sublogger.Error().
-				Str("address", validator.OperatorAddress).
-				Err(err).
-				Msg("Could not parse delegator shares")
-		} else {
-			validatorsDelegatorSharesGauge.With(prometheus.Labels{
+			validatorsStatusGauge.With(prometheus.Labels{
 				"address": validator.OperatorAddress,
 				"moniker": validator.Description.Moniker,
-				"denom":   Denom,
-			}).Set(value / DenomCoefficient)
-		}
+			}).Set(float64(validator.Status))
 
-		// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
-		if value, err := strconv.ParseFloat(validator.MinSelfDelegation.String(), 64); err != nil {
-			sublogger.Error().
-				Str("address", validator.OperatorAddress).
-				Err(err).
-				Msg("Could not parse validator min self delegation")
-		} else {
-			validatorsMinSelfDelegationGauge.With(prometheus.Labels{
-				"address": validator.OperatorAddress,
-				"moniker": validator.Description.Moniker,
-				"denom":   Denom,
-			}).Set(value / DenomCoefficient)
-		}
-
-		err = validator.UnpackInterfaces(interfaceRegistry) // Unpack interfaces, to populate the Anys' cached values
-		if err != nil {
-			sublogger.Error().
-				Str("address", validator.OperatorAddress).
-				Err(err).
-				Msg("Could not get unpack validator inferfaces")
-		}
-
-		pubKey, err := validator.GetConsAddr()
-		if err != nil {
-			sublogger.Error().
-				Str("address", validator.OperatorAddress).
-				Err(err).
-				Msg("Could not get validator pubkey")
-		}
-
-		var signingInfo slashingtypes.ValidatorSigningInfo
-		found := false
-
-		for _, signingInfoIterated := range signingInfos {
-			if pubKey.String() == signingInfoIterated.Address {
-				found = true
-				signingInfo = signingInfoIterated
-				break
-			}
-		}
-
-		if !found {
-			sublogger.Debug().
-				Str("address", validator.OperatorAddress).
-				Msg("Could not get signing info for validator")
-			continue
-		}
-
-		if validator.Status == stakingtypes.Bonded {
-			validatorsMissedBlocksGauge.With(prometheus.Labels{
-				"address": validator.OperatorAddress,
-				"moniker": validator.Description.Moniker,
-			}).Set(float64(signingInfo.MissedBlocksCounter))
-		} else {
-			sublogger.Trace().
-				Str("address", validator.OperatorAddress).
-				Msg("Validator is not active, not returning missed blocks amount.")
-		}
-
-		validatorsRankGauge.With(prometheus.Labels{
-			"address": validator.OperatorAddress,
-			"moniker": validator.Description.Moniker,
-		}).Set(float64(index + 1))
-
-		if validatorSetLength != 0 {
 			// golang doesn't have a ternary operator, so we have to stick with this ugly solution
-			var active float64
+			var jailed float64
 
-			if index+1 <= int(validatorSetLength) {
-				active = 1
+			if validator.Jailed {
+				jailed = 1
 			} else {
-				active = 0
+				jailed = 0
 			}
-
-			validatorsIsActiveGauge.With(prometheus.Labels{
+			validatorsJailedGauge.With(prometheus.Labels{
 				"address": validator.OperatorAddress,
 				"moniker": validator.Description.Moniker,
-			}).Set(active)
+			}).Set(jailed)
+
+			// Замените преобразование Decimal в Float на использование math/big.Float
+			delegatorSharesFloat := new(big.Float)
+			delegatorSharesFloat, _, err := delegatorSharesFloat.Parse(validator.DelegatorShares.String(), 10)
+
+			if err != nil {
+				log.Error().
+					Err(err).
+					Str("address", validator.OperatorAddress).
+					Msg("Could not parse delegator shares")
+			} else {
+				delegatorSharesFloatVal, _ := delegatorSharesFloat.Float64()
+				validatorsDelegatorSharesGauge.With(prometheus.Labels{
+					"address": validator.OperatorAddress,
+					"moniker": validator.Description.Moniker,
+					"denom":   Denom,
+				}).Set(delegatorSharesFloatVal)
+
+				// Замените преобразование Decimal в Float на использование math/big.Float
+				minSelfDelegationFloat := new(big.Float)
+				minSelfDelegationFloat, _, err := minSelfDelegationFloat.Parse(validator.MinSelfDelegation.String(), 10)
+
+				if err != nil {
+					log.Error().
+						Err(err).
+						Str("address", validator.OperatorAddress).
+						Msg("Could not parse validator min self delegation")
+				} else {
+					minSelfDelegationFloatVal, _ := minSelfDelegationFloat.Float64()
+					validatorsMinSelfDelegationGauge.With(prometheus.Labels{
+						"address": validator.OperatorAddress,
+						"moniker": validator.Description.Moniker,
+						"denom":   Denom,
+					}).Set(minSelfDelegationFloatVal)
+
+					err = validator.UnpackInterfaces(interfaceRegistry) // Unpack interfaces, to populate the Anys' cached values
+					if err != nil {
+						sublogger.Error().
+							Str("address", validator.OperatorAddress).
+							Err(err).
+							Msg("Could not get unpack validator inferfaces")
+					}
+
+					pubKey, err := validator.GetConsAddr()
+					if err != nil {
+						sublogger.Error().
+							Str("address", validator.OperatorAddress).
+							Err(err).
+							Msg("Could not get validator pubkey")
+					}
+
+					var signingInfo slashingtypes.ValidatorSigningInfo
+					found := false
+
+					for _, signingInfoIterated := range signingInfos {
+						if pubKey.String() == signingInfoIterated.Address {
+							found = true
+							signingInfo = signingInfoIterated
+							break
+						}
+					}
+
+					if !found {
+						sublogger.Debug().
+							Str("address", validator.OperatorAddress).
+							Msg("Could not get signing info for validator")
+						continue
+					}
+
+					if validator.Status == stakingtypes.Bonded {
+						validatorsMissedBlocksGauge.With(prometheus.Labels{
+							"address": validator.OperatorAddress,
+							"moniker": validator.Description.Moniker,
+						}).Set(float64(signingInfo.MissedBlocksCounter))
+					} else {
+						sublogger.Trace().
+							Str("address", validator.OperatorAddress).
+							Msg("Validator is not active, not returning missed blocks amount.")
+					}
+
+					validatorsRankGauge.With(prometheus.Labels{
+						"address": validator.OperatorAddress,
+						"moniker": validator.Description.Moniker,
+					}).Set(float64(index + 1))
+
+					if validatorSetLength != 0 {
+						// golang doesn't have a ternary operator, so we have to stick with this ugly solution
+						var active float64
+
+						if index+1 <= int(validatorSetLength) {
+							active = 1
+						} else {
+							active = 0
+						}
+
+						validatorsIsActiveGauge.With(prometheus.Labels{
+							"address": validator.OperatorAddress,
+							"moniker": validator.Description.Moniker,
+						}).Set(active)
+					}
+				}
+
+				h := promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
+				h.ServeHTTP(w, r)
+				sublogger.Info().
+					Str("method", "GET").
+					Str("endpoint", "/metrics/validators").
+					Float64("request-time", time.Since(requestStart).Seconds()).
+					Msg("Request processed")
+			}
 		}
 	}
-
-	h := promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
-	h.ServeHTTP(w, r)
-	sublogger.Info().
-		Str("method", "GET").
-		Str("endpoint", "/metrics/validators").
-		Float64("request-time", time.Since(requestStart).Seconds()).
-		Msg("Request processed")
 }
