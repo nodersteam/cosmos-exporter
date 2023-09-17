@@ -229,7 +229,8 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 				Msg("Could not parse delegator tokens")
 		} else {
 			// Ensure that the 'moniker' string contains only valid UTF-8 characters.
-			moniker := sanitizeUTF8(validator.Description.Moniker)
+			moniker := validator.Description.Moniker
+			moniker = sanitizeUTF8(moniker)
 			tokensFloatVal, _ := tokensFloat.Float64()
 			validatorsTokensGauge.With(prometheus.Labels{
 				"address": validator.OperatorAddress,
