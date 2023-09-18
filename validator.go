@@ -167,7 +167,6 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 	registry.MustRegister(validatorStatusGauge)
 	registry.MustRegister(validatorJailedGauge)
 
-	// doing this not in goroutine as we'll need the moniker value later
 	sublogger.Debug().
 		Str("address", address).
 		Msg("Started querying validator")
@@ -204,7 +203,6 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 		}).Set(value / DenomCoefficient)
 	}
 
-	// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
 	if value, err := strconv.ParseFloat(validator.Validator.DelegatorShares.String(), 64); err != nil {
 		sublogger.Error().
 			Str("address", address).
@@ -218,7 +216,6 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 		}).Set(value / DenomCoefficient)
 	}
 
-	// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
 	if rate, err := strconv.ParseFloat(validator.Validator.Commission.CommissionRates.Rate.String(), 64); err != nil {
 		sublogger.Error().
 			Str("address", address).
@@ -236,7 +233,6 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 		"moniker": validator.Validator.Description.Moniker,
 	}).Set(float64(validator.Validator.Status))
 
-	// golang doesn't have a ternary operator, so we have to stick with this ugly solution
 	var jailed float64
 
 	if validator.Validator.Jailed {
@@ -329,7 +325,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			Msg("Finished querying validator commission")
 
 		for _, commission := range distributionRes.Commission.Commission {
-			// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
+
 			value, err := strconv.ParseFloat(commission.Amount.String(), 64)
 			if err != nil {
 				log.Error().
@@ -374,7 +370,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			Msg("Finished querying validator rewards")
 
 		for _, reward := range distributionRes.Rewards.Rewards {
-			// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
+
 			if value, err := strconv.ParseFloat(reward.Amount.String(), 64); err != nil {
 				sublogger.Error().
 					Str("address", address).
@@ -434,7 +430,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			validatorUnbondingsGauge.With(prometheus.Labels{
 				"address":     unbonding.ValidatorAddress,
 				"moniker":     validator.Validator.Description.Moniker,
-				"denom":       Denom, // unbonding does not have denom in response for some reason
+				"denom":       Denom, 
 				"unbonded_by": unbonding.DelegatorAddress,
 			}).Set(sum / DenomCoefficient)
 		}
@@ -484,7 +480,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			validatorRedelegationsGauge.With(prometheus.Labels{
 				"address":        redelegation.Redelegation.ValidatorSrcAddress,
 				"moniker":        validator.Validator.Description.Moniker,
-				"denom":          Denom, // redelegation does not have denom in response for some reason
+				"denom":          Denom, 
 				"redelegated_by": redelegation.Redelegation.DelegatorAddress,
 				"redelegated_to": redelegation.Redelegation.ValidatorDstAddress,
 			}).Set(sum / DenomCoefficient)
@@ -503,7 +499,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 		encCfg := simapp.MakeTestEncodingConfig()
 		interfaceRegistry := encCfg.InterfaceRegistry
 
-		err := validator.Validator.UnpackInterfaces(interfaceRegistry) // Unpack interfaces, to populate the Anys' cached values
+		err := validator.Validator.UnpackInterfaces(interfaceRegistry) 
 		if err != nil {
 			sublogger.Error().
 				Str("address", address).
@@ -581,7 +577,6 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 
 		validators := stakingRes.Validators
 
-		// sorting by delegator shares to display rankings
 		sort.Slice(validators, func(i, j int) bool {
 			firstShares, firstErr := strconv.ParseFloat(validators[i].DelegatorShares.String(), 64)
 			secondShares, secondErr := strconv.ParseFloat(validators[j].DelegatorShares.String(), 64)
@@ -639,7 +634,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			Float64("request-time", time.Since(queryStart).Seconds()).
 			Msg("Finished querying validator params")
 
-		// golang doesn't have a ternary operator, so we have to stick with this ugly solution
+
 		var active float64
 
 		if validatorRank <= int(paramsRes.Params.MaxValidators) {
