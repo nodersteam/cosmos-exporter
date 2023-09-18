@@ -153,7 +153,6 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 			Msg("Finished querying validators")
 		validators = validatorsResponse.Validators
 
-		// sorting by delegator shares to display rankings
 		sort.Slice(validators, func(i, j int) bool {
 			return validators[i].DelegatorShares.GT(validators[j].DelegatorShares)
 		})
@@ -219,7 +218,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		Msg("Validators info")
 
 	for index, validator := range validators {
-		// Замените преобразование Decimal в Float на использование math/big.Float
+
 		tokensFloat := new(big.Float)
 		tokensFloat, _, err := tokensFloat.Parse(validator.Tokens.String(), 10)
 
@@ -229,7 +228,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 				Str("address", validator.OperatorAddress).
 				Msg("Could not parse delegator tokens")
 		} else {
-			// Ensure that the 'moniker' string contains only valid UTF-8 characters.
+
 			moniker := validator.Description.Moniker
 			moniker = sanitizeUTF8(moniker)
 			tokensFloatVal, _ := tokensFloat.Float64()
@@ -244,7 +243,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 				"moniker": moniker,
 			}).Set(float64(validator.Status))
 
-			// golang doesn't have a ternary operator, so we have to stick with this ugly solution
+
 			var jailed float64
 
 			if validator.Jailed {
@@ -257,7 +256,6 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 				"moniker": moniker,
 			}).Set(jailed)
 
-			// Замените преобразование Decimal в Float на использование math/big.Float
 			delegatorSharesFloat := new(big.Float)
 			delegatorSharesFloat, _, err := delegatorSharesFloat.Parse(validator.DelegatorShares.String(), 10)
 
@@ -274,7 +272,6 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 					"denom":   Denom,
 				}).Set(delegatorSharesFloatVal)
 
-				// Замените преобразование Decimal в Float на использование math/big.Float
 				minSelfDelegationFloat := new(big.Float)
 				minSelfDelegationFloat, _, err := minSelfDelegationFloat.Parse(validator.MinSelfDelegation.String(), 10)
 
@@ -291,7 +288,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 						"denom":   Denom,
 					}).Set(minSelfDelegationFloatVal)
 
-					err = validator.UnpackInterfaces(interfaceRegistry) // Unpack interfaces, to populate the Anys' cached values
+					err = validator.UnpackInterfaces(interfaceRegistry) 
 					if err != nil {
 						sublogger.Error().
 							Str("address", validator.OperatorAddress).
@@ -342,7 +339,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 					}).Set(float64(index + 1))
 
 					if validatorSetLength != 0 {
-						// golang doesn't have a ternary operator, so we have to stick with this ugly solution
+
 						var active float64
 
 						if index+1 <= int(validatorSetLength) {
@@ -370,7 +367,6 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		Msg("Request processed")
 }
 
-// Определите функцию для очистки строки от недопустимых символов UTF-8.
 func sanitizeUTF8(input string) string {
 	buf := &bytes.Buffer{}
 	for _, runeValue := range input {
