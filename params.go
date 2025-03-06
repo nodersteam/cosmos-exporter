@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
+
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
@@ -14,7 +16,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"google.golang.org/grpc"
 )
 
 func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
@@ -43,7 +44,7 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 	paramsBlocksPerYearGauge := prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name:        "cosmos_params_blocks_per_year",
-			Help:        "Block per year",
+			Help:        "Blocks per year",
 			ConstLabels: ConstLabels,
 		},
 	)
@@ -80,9 +81,9 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 		},
 	)
 
-	paramsDowntailJailDurationGauge := prometheus.NewGauge(
+	paramsDowntimeJailDurationGauge := prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Name:        "cosmos_params_downtail_jail_duration",
+			Name:        "cosmos_params_downtime_jail_duration",
 			Help:        "Downtime jail duration, in seconds",
 			ConstLabels: ConstLabels,
 		},
@@ -135,6 +136,7 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			ConstLabels: ConstLabels,
 		},
 	)
+
 	paramsCommunityTaxGauge := prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name:        "cosmos_params_community_tax",
@@ -147,10 +149,11 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 	registry.MustRegister(paramsMaxValidatorsGauge)
 	registry.MustRegister(paramsUnbondingTimeGauge)
 	registry.MustRegister(paramsBlocksPerYearGauge)
+	registry.MustRegister(paramsGoalBondedGauge)
 	registry.MustRegister(paramsInflationMinGauge)
 	registry.MustRegister(paramsInflationMaxGauge)
 	registry.MustRegister(paramsInflationRateChangeGauge)
-	registry.MustRegister(paramsDowntailJailDurationGauge)
+	registry.MustRegister(paramsDowntimeJailDurationGauge)
 	registry.MustRegister(paramsMinSignedPerWindowGauge)
 	registry.MustRegister(paramsSignedBlocksWindowGauge)
 	registry.MustRegister(paramsSlashFractionDoubleSign)
@@ -161,6 +164,7 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 
 	var wg sync.WaitGroup
 
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		sublogger.Debug().Msg("Started querying global staking params")
@@ -185,8 +189,8 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 		paramsMaxValidatorsGauge.Set(float64(paramsResponse.Params.MaxValidators))
 		paramsUnbondingTimeGauge.Set(paramsResponse.Params.UnbondingTime.Seconds())
 	}()
-	wg.Add(1)
 
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		sublogger.Debug().Msg("Started querying global mint params")
@@ -210,7 +214,6 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 
 		paramsBlocksPerYearGauge.Set(float64(paramsResponse.Params.BlocksPerYear))
 
-		// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
 		if value, err := strconv.ParseFloat(paramsResponse.Params.GoalBonded.String(), 64); err != nil {
 			sublogger.Error().
 				Err(err).
@@ -230,7 +233,7 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 		if value, err := strconv.ParseFloat(paramsResponse.Params.InflationMax.String(), 64); err != nil {
 			sublogger.Error().
 				Err(err).
-				Msg("Could not parse inflation min")
+				Msg("Could not parse inflation max")
 		} else {
 			paramsInflationMaxGauge.Set(value)
 		}
@@ -243,8 +246,8 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			paramsInflationRateChangeGauge.Set(value)
 		}
 	}()
-	wg.Add(1)
 
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		sublogger.Debug().Msg("Started querying global slashing params")
@@ -266,7 +269,7 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			Float64("request-time", time.Since(queryStart).Seconds()).
 			Msg("Finished querying global slashing params")
 
-		paramsDowntailJailDurationGauge.Set(paramsResponse.Params.DowntimeJailDuration.Seconds())
+		paramsDowntimeJailDurationGauge.Set(paramsResponse.Params.DowntimeJailDuration.Seconds())
 		paramsSignedBlocksWindowGauge.Set(float64(paramsResponse.Params.SignedBlocksWindow))
 
 		if value, err := strconv.ParseFloat(paramsResponse.Params.MinSignedPerWindow.String(), 64); err != nil {
@@ -293,8 +296,8 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			paramsSlashFractionDowntime.Set(value)
 		}
 	}()
-	wg.Add(1)
 
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		sublogger.Debug().Msg("Started querying global distribution params")
@@ -316,7 +319,6 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			Float64("request-time", time.Since(queryStart).Seconds()).
 			Msg("Finished querying global distribution params")
 
-		// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
 		if value, err := strconv.ParseFloat(paramsResponse.Params.BaseProposerReward.String(), 64); err != nil {
 			sublogger.Error().
 				Err(err).
@@ -336,12 +338,11 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 		if value, err := strconv.ParseFloat(paramsResponse.Params.CommunityTax.String(), 64); err != nil {
 			sublogger.Error().
 				Err(err).
-				Msg("Could not parse community rate")
+				Msg("Could not parse community tax")
 		} else {
 			paramsCommunityTaxGauge.Set(value)
 		}
 	}()
-	wg.Add(1)
 
 	wg.Wait()
 

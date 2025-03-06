@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
+
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
@@ -14,7 +16,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"google.golang.org/grpc"
 )
 
 func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
@@ -61,7 +62,7 @@ func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Clien
 	generalInflationGauge := prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name:        "cosmos_general_inflation",
-			Help:        "Total supply",
+			Help:        "Inflation rate",
 			ConstLabels: ConstLabels,
 		},
 	)
@@ -72,7 +73,7 @@ func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Clien
 			Help:        "Annual provisions",
 			ConstLabels: ConstLabels,
 		},
-		[]string{"denom"},
+		[]string{"denoms"},
 	)
 
 	registry := prometheus.NewRegistry()
@@ -136,7 +137,7 @@ func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Clien
 					Msg("Could not get community pool coin")
 			} else {
 				generalCommunityPoolGauge.With(prometheus.Labels{
-					"denom": Denom,
+					"denom": coin.Denom,
 				}).Set(value / DenomCoefficient)
 			}
 		}
@@ -169,7 +170,7 @@ func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Clien
 					Msg("Could not get total supply")
 			} else {
 				generalSupplyTotalGauge.With(prometheus.Labels{
-					"denom": Denom,
+					"denom": coin.Denom,
 				}).Set(value / DenomCoefficient)
 			}
 		}
@@ -198,7 +199,7 @@ func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Clien
 		if value, err := strconv.ParseFloat(response.Inflation.String(), 64); err != nil {
 			sublogger.Error().
 				Err(err).
-				Msg("Could not get inflation")
+				Msg("Could not parse inflation")
 		} else {
 			generalInflationGauge.Set(value)
 		}
@@ -227,7 +228,7 @@ func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Clien
 		if value, err := strconv.ParseFloat(response.AnnualProvisions.String(), 64); err != nil {
 			sublogger.Error().
 				Err(err).
-				Msg("Could not get annual provisions")
+				Msg("Could not parse annual provisions")
 		} else {
 			generalAnnualProvisions.With(prometheus.Labels{
 				"denom": Denom,

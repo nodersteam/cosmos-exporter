@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"math/big"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
@@ -14,7 +16,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"google.golang.org/grpc"
 )
 
 func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
@@ -30,7 +31,7 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 		sublogger.Error().
 			Str("address", address).
 			Err(err).
-			Msg("Could not get address")
+			Msg("Could not parse address")
 		return
 	}
 
@@ -55,7 +56,7 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 	walletRedelegationGauge := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name:        "cosmos_wallet_redelegations",
-			Help:        "Redlegations of the Cosmos-based blockchain wallet",
+			Help:        "Redelegations of the Cosmos-based blockchain wallet",
 			ConstLabels: ConstLabels,
 		},
 		[]string{"address", "denom", "redelegated_from", "redelegated_to"},
@@ -115,18 +116,11 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			Msg("Finished querying balance")
 
 		for _, balance := range bankRes.Balances {
-			// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
-			if value, err := strconv.ParseFloat(balance.Amount.String(), 64); err != nil {
-				sublogger.Error().
-					Str("address", address).
-					Err(err).
-					Msg("Could not parse balance")
-			} else {
-				walletBalanceGauge.With(prometheus.Labels{
-					"address": address,
-					"denom":   Denom,
-				}).Set(value / DenomCoefficient)
-			}
+			value, _ := new(big.Float).SetInt(balance.Amount.BigInt()).Float64()
+			walletBalanceGauge.With(prometheus.Labels{
+				"address": address,
+				"denom":   balance.Denom, // Используем реальный denom из ответа
+			}).Set(value / DenomCoefficient)
 		}
 	}()
 
@@ -157,19 +151,12 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			Msg("Finished querying delegations")
 
 		for _, delegation := range stakingRes.DelegationResponses {
-			// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
-			if value, err := strconv.ParseFloat(delegation.Balance.Amount.String(), 64); err != nil {
-				sublogger.Error().
-					Str("address", address).
-					Err(err).
-					Msg("Could not get delegation")
-			} else {
-				walletDelegationGauge.With(prometheus.Labels{
-					"address":      address,
-					"denom":        Denom,
-					"delegated_to": delegation.Delegation.ValidatorAddress,
-				}).Set(value / DenomCoefficient)
-			}
+			value, _ := new(big.Float).SetInt(delegation.Balance.Amount.BigInt()).Float64()
+			walletDelegationGauge.With(prometheus.Labels{
+				"address":      address,
+				"denom":        delegation.Balance.Denom, // Используем реальный denom
+				"delegated_to": delegation.Delegation.ValidatorAddress,
+			}).Set(value / DenomCoefficient)
 		}
 	}()
 
@@ -202,20 +189,13 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 		for _, unbonding := range stakingRes.UnbondingResponses {
 			var sum float64 = 0
 			for _, entry := range unbonding.Entries {
-				// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
-				if value, err := strconv.ParseFloat(entry.Balance.String(), 64); err != nil {
-					sublogger.Error().
-						Str("address", address).
-						Err(err).
-						Msg("Could not parse unbonding delegation")
-				} else {
-					sum += value
-				}
+				value, _ := new(big.Float).SetInt(entry.Balance.BigInt()).Float64()
+				sum += value
 			}
 
 			walletUnbondingsGauge.With(prometheus.Labels{
 				"address":       unbonding.DelegatorAddress,
-				"denom":         Denom, // unbonding does not have denom in response for some reason
+				"denom":         Denom, // Нет denoma в ответе, используем глобальный
 				"unbonded_from": unbonding.ValidatorAddress,
 			}).Set(sum / DenomCoefficient)
 		}
@@ -250,20 +230,13 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 		for _, redelegation := range stakingRes.RedelegationResponses {
 			var sum float64 = 0
 			for _, entry := range redelegation.Entries {
-				// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
-				if value, err := strconv.ParseFloat(entry.Balance.String(), 64); err != nil {
-					sublogger.Error().
-						Str("address", address).
-						Err(err).
-						Msg("Could not parse redelegation")
-				} else {
-					sum += value
-				}
+				value, _ := new(big.Float).SetInt(entry.Balance.BigInt()).Float64()
+				sum += value
 			}
 
 			walletRedelegationGauge.With(prometheus.Labels{
 				"address":          redelegation.Redelegation.DelegatorAddress,
-				"denom":            Denom, // redelegation does not have denom in response for some reason
+				"denom":            Denom, // Нет denoma в ответе, используем глобальный
 				"redelegated_from": redelegation.Redelegation.ValidatorSrcAddress,
 				"redelegated_to":   redelegation.Redelegation.ValidatorDstAddress,
 			}).Set(sum / DenomCoefficient)
@@ -273,7 +246,6 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-
 		sublogger.Debug().
 			Str("address", address).
 			Msg("Started querying rewards")
@@ -291,6 +263,7 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 				Msg("Could not get rewards")
 			return
 		}
+
 		sublogger.Debug().
 			Str("address", address).
 			Float64("request-time", time.Since(queryStart).Seconds()).
@@ -298,19 +271,12 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 
 		for _, reward := range distributionRes.Rewards {
 			for _, entry := range reward.Reward {
-				// because cosmos's dec doesn't have .toFloat64() method or whatever and returns everything as int
-				if value, err := strconv.ParseFloat(entry.Amount.String(), 64); err != nil {
-					sublogger.Error().
-						Str("address", address).
-						Err(err).
-						Msg("Could not parse reward")
-				} else {
-					walletRewardsGauge.With(prometheus.Labels{
-						"address":           address,
-						"denom":             Denom,
-						"validator_address": reward.ValidatorAddress,
-					}).Set(value / DenomCoefficient)
-				}
+				value, _ := new(big.Float).SetInt(entry.Amount.BigInt()).Float64()
+				walletRewardsGauge.With(prometheus.Labels{
+					"address":           address,
+					"denom":             entry.Denom, // Используем реальный denom
+					"validator_address": reward.ValidatorAddress,
+				}).Set(value / DenomCoefficient)
 			}
 		}
 	}()
