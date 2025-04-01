@@ -1,0 +1,5 @@
+[33mcommit 60c5282fd67d4917128db58f982e7e52441d189e[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mdev[m[33m)[m
+Author: NODERSSeptimA <alex@noders.team>
+Date:   Tue Apr 1 11:24:02 2025 +0700
+
+    feat: добавлена поддержка типа ключа cometbft/PubKeyBn254 и улучшена обработка ошибок

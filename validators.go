@@ -219,7 +219,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		moniker = sanitizeUTF8(moniker)
 
 		// Исправление для validator.Tokens
-		value, _ := new(big.Float).SetInt(validator.Tokens.BigInt()).Float64() // Игнорируем точность
+		value, _ := new(big.Float).SetInt(validator.Tokens.BigInt()).Float64()
 		validatorsTokensGauge.With(prometheus.Labels{
 			"address": validator.OperatorAddress,
 			"moniker": moniker,
@@ -243,7 +243,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		}).Set(jailed)
 
 		// Исправление для validator.DelegatorShares
-		value, _ = new(big.Float).SetInt(validator.DelegatorShares.BigInt()).Float64() // Игнорируем точность
+		value, _ = new(big.Float).SetInt(validator.DelegatorShares.BigInt()).Float64()
 		validatorsDelegatorSharesGauge.With(prometheus.Labels{
 			"address": validator.OperatorAddress,
 			"moniker": moniker,
@@ -251,7 +251,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		}).Set(value / DenomCoefficient)
 
 		// Исправление для validator.MinSelfDelegation
-		value, _ = new(big.Float).SetInt(validator.MinSelfDelegation.BigInt()).Float64() // Игнорируем точность
+		value, _ = new(big.Float).SetInt(validator.MinSelfDelegation.BigInt()).Float64()
 		validatorsMinSelfDelegationGauge.With(prometheus.Labels{
 			"address": validator.OperatorAddress,
 			"moniker": moniker,
