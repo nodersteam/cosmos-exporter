@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -10,6 +11,8 @@ import (
 
 	"google.golang.org/grpc"
 
+	cometbftcrypto "github.com/cometbft/cometbft/crypto"
+	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
@@ -619,4 +622,26 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 		Str("endpoint", "/metrics/validator?address="+address).
 		Float64("request-time", time.Since(requestStart).Seconds()).
 		Msg("Request processed")
+}
+
+func (v *stakingtypes.Validator) GetConsAddr() ([]byte, error) {
+	if v.ConsensusPubkey == nil {
+		return nil, fmt.Errorf("validator consensus pubkey is nil")
+	}
+
+	var pubKey cryptotypes.PubKey
+	if err := v.ConsensusPubkey.UnpackInterfaces(interfaceRegistry); err != nil {
+		return nil, fmt.Errorf("failed to unpack consensus pubkey: %w", err)
+	}
+
+	pubKey, ok := v.ConsensusPubkey.GetCachedValue().(cryptotypes.PubKey)
+	if !ok {
+		// Пробуем получить ключ как cometbft/PubKeyBn254
+		if pubKeyBn254, ok := v.ConsensusPubkey.GetCachedValue().(*cometbftcrypto.PubKeyBn254); ok {
+			return pubKeyBn254.Address(), nil
+		}
+		return nil, fmt.Errorf("expecting cryptotypes.PubKey, got %T: invalid type", v.ConsensusPubkey.GetCachedValue())
+	}
+
+	return pubKey.Address(), nil
 }
