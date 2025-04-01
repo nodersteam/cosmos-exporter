@@ -517,7 +517,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 		slashingClient := slashingtypes.NewQueryClient(grpcConn)
 		slashingRes, err := slashingClient.SigningInfo(
 			context.Background(),
-			&slashingtypes.QuerySigningInfoRequest{ConsAddress: string(consAddr)},
+			&slashingtypes.QuerySigningInfoRequest{ConsAddress: sdk.ConsAddress(consAddr).String()},
 		)
 		if err != nil {
 			sublogger.Error().
@@ -647,7 +647,7 @@ func GetValidatorConsAddr(v stakingtypes.Validator) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return addr.Bytes(), nil
+	return addr, nil
 }
 
 func (v *ValidatorMetricsHandler) GetConsAddr(validator stakingtypes.Validator) (sdk.ConsAddress, error) {
@@ -661,6 +661,7 @@ func (v *ValidatorMetricsHandler) GetConsAddr(validator stakingtypes.Validator) 
 		if len(validator.ConsensusPubkey.Value) == 0 {
 			return nil, fmt.Errorf("empty consensus public key value for validator %s", validator.OperatorAddress)
 		}
+		// Создаем консенсусный адрес из байтов
 		return sdk.ConsAddress(validator.ConsensusPubkey.Value), nil
 	}
 
