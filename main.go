@@ -197,47 +197,57 @@ func setChainID() {
 		Timeout: time.Second * 10,
 	}
 
-	// Формируем URL для запроса genesis
-	url := fmt.Sprintf("%s/genesis", TendermintRPC)
+	// Формируем URL для запроса статуса
+	url := fmt.Sprintf("%s/status", TendermintRPC)
 
 	// Выполняем запрос
 	resp, err := client.Get(url)
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Msg("Could not query genesis via HTTP, using default chain ID")
+			Msg("Could not query node status via HTTP, using default chain ID")
+		ChainID = "union"
+		return
+	}
+	defer resp.Body.Close()
+
+	// Читаем тело ответа
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Msg("Could not read status response, using default chain ID")
+		ChainID = "union"
+		return
+	}
+
+	// Парсим JSON ответ
+	var result struct {
+		Result struct {
+			NodeInfo struct {
+				Network string `json:"network"`
+			} `json:"node_info"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		log.Warn().
+			Err(err).
+			Msg("Could not parse status response, using default chain ID")
+		ChainID = "union"
+		return
+	}
+
+	chainID := result.Result.NodeInfo.Network
+	if chainID == "" {
+		log.Warn().
+			Msg("Empty chain ID received from node, using default")
 		ChainID = "union"
 	} else {
-		defer resp.Body.Close()
-
-		// Читаем тело ответа
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			log.Warn().
-				Err(err).
-				Msg("Could not read genesis response, using default chain ID")
-			ChainID = "union"
-		} else {
-			// Парсим JSON ответ
-			var result struct {
-				Result struct {
-					Genesis struct {
-						ChainID string `json:"chain_id"`
-					} `json:"genesis"`
-				} `json:"result"`
-			}
-			if err := json.Unmarshal(body, &result); err != nil {
-				log.Warn().
-					Err(err).
-					Msg("Could not parse genesis response, using default chain ID")
-				ChainID = "union"
-			} else {
-				log.Info().
-					Str("chain_id", result.Result.Genesis.ChainID).
-					Msg("Got chain ID from genesis")
-				ChainID = result.Result.Genesis.ChainID
-			}
-		}
+		log.Info().
+			Str("chain_id", chainID).
+			Msg("Got chain ID from node status")
+		ChainID = chainID
 	}
 
 	// Обновляем метки для всех метрик
