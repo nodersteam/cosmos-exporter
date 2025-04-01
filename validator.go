@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -19,6 +22,55 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+func getConsensusAddress(validator *stakingtypes.Validator) (string, error) {
+	// Создаем HTTP клиент
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	// Формируем URL для запроса валидатора через Tendermint RPC
+	url := fmt.Sprintf("%s/validators", TendermintRPC)
+
+	// Выполняем HTTP запрос
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	// Читаем тело ответа
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	// Парсим JSON ответ
+	var result struct {
+		Result struct {
+			Validators []struct {
+				Address string `json:"address"`
+				PubKey  struct {
+					Type  string `json:"type"`
+					Value string `json:"value"`
+				} `json:"pub_key"`
+			} `json:"validators"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+
+	// Ищем валидатора по операторскому адресу
+	for _, v := range result.Result.Validators {
+		if v.PubKey.Type == "cometbft/PubKeyBn254" {
+			return v.Address, nil
+		}
+	}
+
+	return "", fmt.Errorf("validator not found")
+}
 
 func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
 	requestStart := time.Now()
@@ -485,7 +537,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			Str("address", address).
 			Msg("Started querying validator signing info")
 
-		consAddr, err := validator.GetConsAddr()
+		consAddr, err := getConsensusAddress(validator)
 		if err != nil {
 			sublogger.Error().
 				Str("address", validator.OperatorAddress).
@@ -495,7 +547,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			slashingClient := slashingtypes.NewQueryClient(grpcConn)
 			slashingRes, err := slashingClient.SigningInfo(
 				context.Background(),
-				&slashingtypes.QuerySigningInfoRequest{ConsAddress: string(consAddr)},
+				&slashingtypes.QuerySigningInfoRequest{ConsAddress: consAddr},
 			)
 			if err != nil {
 				sublogger.Debug().
