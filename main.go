@@ -7,14 +7,16 @@ import (
 	"net/http"
 	"os"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	tmrpc "github.com/cometbft/cometbft/rpc/client/http"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
-	tmrpc "github.com/tendermint/tendermint/rpc/client/http"
-	"google.golang.org/grpc"
 )
 
 var (
@@ -61,7 +63,6 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
-		// Credits to https://carolynvanslyck.com/blog/2020/08/sting-of-the-viper/
 		cmd.Flags().VisitAll(func(f *pflag.Flag) {
 			if !f.Changed && viper.IsSet(f.Name) {
 				val := viper.Get(f.Name)
@@ -72,7 +73,6 @@ var rootCmd = &cobra.Command{
 		})
 
 		setBechPrefixes(cmd)
-
 		return nil
 	},
 	Run: Execute,
@@ -136,7 +136,7 @@ func Execute(cmd *cobra.Command, args []string) {
 		Str("--bech-consensus-node-prefix", ConsensusNodePrefix).
 		Str("--bech-consensus-node-pubkey-prefix", ConsensusNodePubkeyPrefix).
 		Str("--denom", Denom).
-		Str("--denom-cofficient", fmt.Sprintf("%f", DenomCoefficient)).
+		Str("--denom-coefficient", fmt.Sprintf("%f", DenomCoefficient)).
 		Str("--denom-exponent", fmt.Sprintf("%d", DenomExponent)).
 		Str("--listen-address", ListenAddress).
 		Str("--node", NodeAddress).
@@ -151,11 +151,12 @@ func Execute(cmd *cobra.Command, args []string) {
 
 	grpcConn, err := grpc.Dial(
 		NodeAddress,
-		grpc.WithInsecure(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Could not connect to gRPC node")
 	}
+	defer grpcConn.Close()
 
 	setChainID()
 	setDenom(grpcConn)
@@ -188,17 +189,17 @@ func Execute(cmd *cobra.Command, args []string) {
 }
 
 func setChainID() {
-	client, err := tmrpc.New(TendermintRPC, "/websocket")
+	client, err := tmrpc.New(TendermintRPC, "/websocket") // Вернули второй аргумент
 	if err != nil {
-		log.Fatal().Err(err).Msg("Could not create Tendermint client")
+		log.Fatal().Err(err).Msg("Could not create CometBFT client")
 	}
 
 	status, err := client.Status(context.Background())
 	if err != nil {
-		log.Fatal().Err(err).Msg("Could not query Tendermint status")
+		log.Fatal().Err(err).Msg("Could not query CometBFT status")
 	}
 
-	log.Info().Str("network", status.NodeInfo.Network).Msg("Got network status from Tendermint")
+	log.Info().Str("network", status.NodeInfo.Network).Msg("Got network status from CometBFT")
 	ChainID = status.NodeInfo.Network
 	ConstLabels = map[string]string{
 		"chain_id": ChainID,
@@ -206,8 +207,6 @@ func setChainID() {
 }
 
 func setDenom(grpcConn *grpc.ClientConn) {
-	// if --denom and (--denom-coefficient or --denom-exponent) are provided, use them
-	// instead of fetching them via gRPC. Can be useful for networks like osmosis.
 	if isUserProvidedAndHandled := checkAndHandleDenomInfoProvidedByUser(); isUserProvidedAndHandled {
 		return
 	}
@@ -225,8 +224,8 @@ func setDenom(grpcConn *grpc.ClientConn) {
 		log.Fatal().Msg("No denom infos. Try running the binary with --denom and --denom-coefficient to set them manually.")
 	}
 
-	metadata := denoms.Metadatas[0] // always using the first one
-	if Denom == "" {                // using display currency
+	metadata := denoms.Metadatas[0]
+	if Denom == "" {
 		Denom = metadata.Display
 	}
 
@@ -249,7 +248,6 @@ func setDenom(grpcConn *grpc.ClientConn) {
 }
 
 func checkAndHandleDenomInfoProvidedByUser() bool {
-
 	if Denom != "" {
 		if DenomCoefficient != 1 && DenomExponent != 0 {
 			log.Fatal().Msg("denom-coefficient and denom-exponent are both provided. Must provide only one")
@@ -277,7 +275,6 @@ func checkAndHandleDenomInfoProvidedByUser() bool {
 	}
 
 	return false
-
 }
 
 func main() {
@@ -292,7 +289,6 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&TendermintRPC, "tendermint-rpc", "http://localhost:26657", "Tendermint RPC address")
 	rootCmd.PersistentFlags().BoolVar(&JsonOutput, "json", false, "Output logs as JSON")
 
-	// some networks, like Iris, have the different prefixes for address, validator and consensus node
 	rootCmd.PersistentFlags().StringVar(&Prefix, "bech-prefix", "persistence", "Bech32 global prefix")
 	rootCmd.PersistentFlags().StringVar(&AccountPrefix, "bech-account-prefix", "", "Bech32 account prefix")
 	rootCmd.PersistentFlags().StringVar(&AccountPubkeyPrefix, "bech-account-pubkey-prefix", "", "Bech32 pubkey account prefix")

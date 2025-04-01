@@ -10,20 +10,17 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/cosmos/cosmos-sdk/simapp"
+	"google.golang.org/grpc"
+
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"google.golang.org/grpc"
 )
 
 func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
-	encCfg := simapp.MakeTestEncodingConfig()
-	interfaceRegistry := encCfg.InterfaceRegistry
-
 	requestStart := time.Now()
 
 	sublogger := log.With().
@@ -78,7 +75,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 	validatorsMinSelfDelegationGauge := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name:        "cosmos_validators_min_self_delegation",
-			Help:        "Self declared minimum self delegation shares of the Cosmos-based blockchain validator",
+			Help:        "Self-declared minimum self-delegation shares of the Cosmos-based blockchain validator",
 			ConstLabels: ConstLabels,
 		},
 		[]string{"address", "moniker", "denom"},
@@ -105,7 +102,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 	validatorsIsActiveGauge := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name:        "cosmos_validators_active",
-			Help:        "1 if the Cosmos-based blockchain validator is in active set, 0 if no",
+			Help:        "1 if the Cosmos-based blockchain validator is in active set, 0 if not",
 			ConstLabels: ConstLabels,
 		},
 		[]string{"address", "moniker"},
@@ -218,143 +215,99 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		Msg("Validators info")
 
 	for index, validator := range validators {
+		moniker := validator.Description.Moniker
+		moniker = sanitizeUTF8(moniker)
 
-		tokensFloat := new(big.Float)
-		tokensFloat, _, err := tokensFloat.Parse(validator.Tokens.String(), 10)
+		// Исправление для validator.Tokens
+		value, _ := new(big.Float).SetInt(validator.Tokens.BigInt()).Float64() // Игнорируем точность
+		validatorsTokensGauge.With(prometheus.Labels{
+			"address": validator.OperatorAddress,
+			"moniker": moniker,
+			"denom":   Denom,
+		}).Set(value / DenomCoefficient)
 
-		if err != nil {
-			log.Error().
-				Err(err).
-				Str("address", validator.OperatorAddress).
-				Msg("Could not parse delegator tokens")
+		validatorsStatusGauge.With(prometheus.Labels{
+			"address": validator.OperatorAddress,
+			"moniker": moniker,
+		}).Set(float64(validator.Status))
+
+		var jailed float64
+		if validator.Jailed {
+			jailed = 1
 		} else {
+			jailed = 0
+		}
+		validatorsJailedGauge.With(prometheus.Labels{
+			"address": validator.OperatorAddress,
+			"moniker": moniker,
+		}).Set(jailed)
 
-			moniker := validator.Description.Moniker
-			moniker = sanitizeUTF8(moniker)
-			tokensFloatVal, _ := tokensFloat.Float64()
-			validatorsTokensGauge.With(prometheus.Labels{
-				"address": validator.OperatorAddress,
-				"moniker": moniker,
-				"denom":   Denom,
-			}).Set(tokensFloatVal)
+		// Исправление для validator.DelegatorShares
+		value, _ = new(big.Float).SetInt(validator.DelegatorShares.BigInt()).Float64() // Игнорируем точность
+		validatorsDelegatorSharesGauge.With(prometheus.Labels{
+			"address": validator.OperatorAddress,
+			"moniker": moniker,
+			"denom":   Denom,
+		}).Set(value / DenomCoefficient)
 
-			validatorsStatusGauge.With(prometheus.Labels{
-				"address": validator.OperatorAddress,
-				"moniker": moniker,
-			}).Set(float64(validator.Status))
+		// Исправление для validator.MinSelfDelegation
+		value, _ = new(big.Float).SetInt(validator.MinSelfDelegation.BigInt()).Float64() // Игнорируем точность
+		validatorsMinSelfDelegationGauge.With(prometheus.Labels{
+			"address": validator.OperatorAddress,
+			"moniker": moniker,
+			"denom":   Denom,
+		}).Set(value / DenomCoefficient)
 
+		consAddr, err := validator.GetConsAddr()
+		if err != nil {
+			sublogger.Error().
+				Str("address", validator.OperatorAddress).
+				Err(err).
+				Msg("Could not get validator consensus address")
+			continue
+		}
 
-			var jailed float64
-
-			if validator.Jailed {
-				jailed = 1
-			} else {
-				jailed = 0
+		var signingInfo slashingtypes.ValidatorSigningInfo
+		found := false
+		for _, signingInfoIterated := range signingInfos {
+			if bytes.Equal(consAddr, []byte(signingInfoIterated.Address)) {
+				found = true
+				signingInfo = signingInfoIterated
+				break
 			}
-			validatorsJailedGauge.With(prometheus.Labels{
+		}
+
+		if !found {
+			sublogger.Debug().
+				Str("address", validator.OperatorAddress).
+				Msg("Could not get signing info for validator")
+		} else if validator.Status == stakingtypes.Bonded {
+			validatorsMissedBlocksGauge.With(prometheus.Labels{
 				"address": validator.OperatorAddress,
 				"moniker": moniker,
-			}).Set(jailed)
+			}).Set(float64(signingInfo.MissedBlocksCounter))
+		} else {
+			sublogger.Trace().
+				Str("address", validator.OperatorAddress).
+				Msg("Validator is not active, not returning missed blocks amount.")
+		}
 
-			delegatorSharesFloat := new(big.Float)
-			delegatorSharesFloat, _, err := delegatorSharesFloat.Parse(validator.DelegatorShares.String(), 10)
+		validatorsRankGauge.With(prometheus.Labels{
+			"address": validator.OperatorAddress,
+			"moniker": moniker,
+		}).Set(float64(index + 1))
 
-			if err != nil {
-				log.Error().
-					Err(err).
-					Str("address", validator.OperatorAddress).
-					Msg("Could not parse delegator shares")
+		if validatorSetLength != 0 {
+			var active float64
+			if index+1 <= int(validatorSetLength) {
+				active = 1
 			} else {
-				delegatorSharesFloatVal, _ := delegatorSharesFloat.Float64()
-				validatorsDelegatorSharesGauge.With(prometheus.Labels{
-					"address": validator.OperatorAddress,
-					"moniker": moniker,
-					"denom":   Denom,
-				}).Set(delegatorSharesFloatVal)
-
-				minSelfDelegationFloat := new(big.Float)
-				minSelfDelegationFloat, _, err := minSelfDelegationFloat.Parse(validator.MinSelfDelegation.String(), 10)
-
-				if err != nil {
-					log.Error().
-						Err(err).
-						Str("address", validator.OperatorAddress).
-						Msg("Could not parse validator min self delegation")
-				} else {
-					minSelfDelegationFloatVal, _ := minSelfDelegationFloat.Float64()
-					validatorsMinSelfDelegationGauge.With(prometheus.Labels{
-						"address": validator.OperatorAddress,
-						"moniker": moniker,
-						"denom":   Denom,
-					}).Set(minSelfDelegationFloatVal)
-
-					err = validator.UnpackInterfaces(interfaceRegistry) 
-					if err != nil {
-						sublogger.Error().
-							Str("address", validator.OperatorAddress).
-							Err(err).
-							Msg("Could not get unpack validator interfaces")
-					}
-
-					pubKey, err := validator.GetConsAddr()
-					if err != nil {
-						sublogger.Error().
-							Str("address", validator.OperatorAddress).
-							Err(err).
-							Msg("Could not get validator pubkey")
-					}
-
-					var signingInfo slashingtypes.ValidatorSigningInfo
-					found := false
-
-					for _, signingInfoIterated := range signingInfos {
-						if pubKey.String() == signingInfoIterated.Address {
-							found = true
-							signingInfo = signingInfoIterated
-							break
-						}
-					}
-
-					if !found {
-						sublogger.Debug().
-							Str("address", validator.OperatorAddress).
-							Msg("Could not get signing info for validator")
-						continue
-					}
-
-					if validator.Status == stakingtypes.Bonded {
-						validatorsMissedBlocksGauge.With(prometheus.Labels{
-							"address": validator.OperatorAddress,
-							"moniker": moniker,
-						}).Set(float64(signingInfo.MissedBlocksCounter))
-					} else {
-						sublogger.Trace().
-							Str("address", validator.OperatorAddress).
-							Msg("Validator is not active, not returning missed blocks amount.")
-					}
-
-					validatorsRankGauge.With(prometheus.Labels{
-						"address": validator.OperatorAddress,
-						"moniker": moniker,
-					}).Set(float64(index + 1))
-
-					if validatorSetLength != 0 {
-
-						var active float64
-
-						if index+1 <= int(validatorSetLength) {
-							active = 1
-						} else {
-							active = 0
-						}
-
-						validatorsIsActiveGauge.With(prometheus.Labels{
-							"address": validator.OperatorAddress,
-							"moniker": moniker,
-						}).Set(active)
-					}
-				}
+				active = 0
 			}
+			validatorsIsActiveGauge.With(prometheus.Labels{
+				"address": validator.OperatorAddress,
+				"moniker": moniker,
+			}).Set(active)
 		}
 	}
 
