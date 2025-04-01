@@ -63,17 +63,17 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 		return
 	}
 
-	consAddr, err := GetValidatorConsAddr(validator)
-	if err != nil {
-		log.Error().Err(err).Str("address", address).Str("request-id", requestID).Msg("Could not get validator consensus address")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	consAddr := GetValidatorConsAddr(&validator)
+	if consAddr == nil {
+		log.Printf("Не удалось получить консенсусный адрес валидатора")
+		http.Error(w, "Не удалось получить консенсусный адрес валидатора", http.StatusInternalServerError)
 		return
 	}
 
 	// Получаем информацию о подписях валидатора
 	slashingClient := slashingtypes.NewQueryClient(grpcConn)
 	signingInfoReq := &slashingtypes.QuerySigningInfoRequest{
-		ConsAddress: string(consAddr),
+		ConsAddress: sdk.ConsAddress(consAddr).String(),
 	}
 	signingInfoResp, err := slashingClient.SigningInfo(r.Context(), signingInfoReq)
 	if err != nil {
@@ -623,34 +623,25 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 }
 
 // GetValidatorConsAddr возвращает консенсусный адрес валидатора
-func GetValidatorConsAddr(validator stakingtypes.Validator) ([]byte, error) {
+func GetValidatorConsAddr(validator *stakingtypes.Validator) []byte {
 	if validator.ConsensusPubkey == nil {
-		return nil, fmt.Errorf("validator %s has no consensus public key", validator.OperatorAddress)
+		return nil
 	}
 
-	// Для Bn254 ключей, значение уже является адресом
-	if validator.ConsensusPubkey.TypeUrl == "/cosmos.crypto.bn254.PubKey" || validator.ConsensusPubkey.TypeUrl == "/cometbft.PubKeyBn254" {
-		// Проверяем, что значение не пустое
-		if len(validator.ConsensusPubkey.Value) == 0 {
-			return nil, fmt.Errorf("empty consensus public key value for validator %s", validator.OperatorAddress)
-		}
-		// Возвращаем байты напрямую
-		return validator.ConsensusPubkey.Value, nil
-	}
-
-	// Для стандартных ключей используем распаковку через интерфейс
 	var pubKey cryptotypes.PubKey
-	if err := interfaceRegistry.UnpackAny(validator.ConsensusPubkey, &pubKey); err != nil {
-		return nil, fmt.Errorf("failed to unpack consensus public key for validator %s: %v", validator.OperatorAddress, err)
+	err := interfaceRegistry.UnpackAny(validator.ConsensusPubkey, &pubKey)
+	if err != nil {
+		log.Printf("Ошибка при распаковке публичного ключа валидатора: %v", err)
+		return nil
 	}
 
-	// Получаем адрес из публичного ключа
-	addr := pubKey.Address()
-	if len(addr) == 0 {
-		return nil, fmt.Errorf("empty address from public key for validator %s", validator.OperatorAddress)
+	// Для Bn254 ключей возвращаем байты напрямую
+	if bn254Key, ok := pubKey.(*PubKeyBn254); ok {
+		return bn254Key.Bytes()
 	}
 
-	return addr, nil
+	// Для других типов ключей используем стандартный метод
+	return pubKey.Address()
 }
 
 func (v *ValidatorMetricsHandler) Handle(validator stakingtypes.Validator) error {
@@ -660,13 +651,12 @@ func (v *ValidatorMetricsHandler) Handle(validator stakingtypes.Validator) error
 
 	queryStart := time.Now()
 
-	consAddr, err := GetValidatorConsAddr(validator)
-	if err != nil {
+	consAddr := GetValidatorConsAddr(&validator)
+	if consAddr == nil {
 		sublogger.Error().
 			Str("validator", validator.OperatorAddress).
-			Err(err).
 			Msg("Failed to get validator consensus address")
-		return err
+		return fmt.Errorf("failed to get validator consensus address")
 	}
 
 	// Используем consAddr и queryStart в дальнейшей логике
