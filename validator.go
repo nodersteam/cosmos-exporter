@@ -75,11 +75,11 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 	signingInfo, err := slashingClient.SigningInfo(
 		context.Background(),
 		&slashingtypes.QuerySigningInfoRequest{
-			ConsAddress: consAddr.String(),
+			ConsAddress: sdk.ConsAddress(consAddr).String(),
 		},
 	)
 	if err != nil {
-		log.Error().Err(err).Str("address", consAddr.String()).Str("request-id", requestID).Msg("Could not get validator signing info")
+		log.Error().Err(err).Str("address", sdk.ConsAddress(consAddr).String()).Str("request-id", requestID).Msg("Could not get validator signing info")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -625,7 +625,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 }
 
 // GetValidatorConsAddr возвращает консенсусный адрес валидатора
-func GetValidatorConsAddr(validator stakingtypes.Validator) (sdk.ConsAddress, error) {
+func GetValidatorConsAddr(validator stakingtypes.Validator) ([]byte, error) {
 	if validator.ConsensusPubkey == nil {
 		return nil, fmt.Errorf("validator %s has no consensus public key", validator.OperatorAddress)
 	}
@@ -636,8 +636,8 @@ func GetValidatorConsAddr(validator stakingtypes.Validator) (sdk.ConsAddress, er
 		if len(validator.ConsensusPubkey.Value) == 0 {
 			return nil, fmt.Errorf("empty consensus public key value for validator %s", validator.OperatorAddress)
 		}
-		// Создаем консенсусный адрес из байтов
-		return sdk.ConsAddress(validator.ConsensusPubkey.Value), nil
+		// Возвращаем байты напрямую
+		return validator.ConsensusPubkey.Value, nil
 	}
 
 	// Для стандартных ключей используем распаковку через интерфейс
@@ -652,7 +652,7 @@ func GetValidatorConsAddr(validator stakingtypes.Validator) (sdk.ConsAddress, er
 		return nil, fmt.Errorf("empty address from public key for validator %s", validator.OperatorAddress)
 	}
 
-	return sdk.ConsAddress(addr), nil
+	return addr, nil
 }
 
 func (v *ValidatorMetricsHandler) Handle(validator stakingtypes.Validator) error {
