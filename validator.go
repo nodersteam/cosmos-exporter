@@ -75,11 +75,11 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 	signingInfo, err := slashingClient.SigningInfo(
 		context.Background(),
 		&slashingtypes.QuerySigningInfoRequest{
-			ConsAddress: sdk.ConsAddress(consAddr).String(),
+			ConsAddress: sdk.AccAddress(consAddr).String(),
 		},
 	)
 	if err != nil {
-		log.Error().Err(err).Str("address", sdk.ConsAddress(consAddr).String()).Str("request-id", requestID).Msg("Could not get validator signing info")
+		log.Error().Err(err).Str("address", sdk.AccAddress(consAddr).String()).Str("request-id", requestID).Msg("Could not get validator signing info")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
