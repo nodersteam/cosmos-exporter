@@ -258,7 +258,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 			"denom":   Denom,
 		}).Set(value / DenomCoefficient)
 
-		consAddr, err := validator.GetConsAddr()
+		consAddr, err := GetValidatorConsAddr(validator)
 		if err != nil {
 			sublogger.Error().
 				Str("address", validator.OperatorAddress).

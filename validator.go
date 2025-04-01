@@ -11,8 +11,6 @@ import (
 
 	"google.golang.org/grpc"
 
-	cometbftcrypto "github.com/cometbft/cometbft/crypto"
-	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
@@ -21,6 +19,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
+	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 )
 
 func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
@@ -624,24 +626,23 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 		Msg("Request processed")
 }
 
-func (v *stakingtypes.Validator) GetConsAddr() ([]byte, error) {
+// GetValidatorConsAddr returns the consensus address of a validator
+func GetValidatorConsAddr(v stakingtypes.Validator) ([]byte, error) {
 	if v.ConsensusPubkey == nil {
-		return nil, fmt.Errorf("validator consensus pubkey is nil")
-	}
-
-	var pubKey cryptotypes.PubKey
-	if err := v.ConsensusPubkey.UnpackInterfaces(interfaceRegistry); err != nil {
-		return nil, fmt.Errorf("failed to unpack consensus pubkey: %w", err)
+		return nil, fmt.Errorf("consensus public key is nil")
 	}
 
 	pubKey, ok := v.ConsensusPubkey.GetCachedValue().(cryptotypes.PubKey)
 	if !ok {
-		// Пробуем получить ключ как cometbft/PubKeyBn254
-		if pubKeyBn254, ok := v.ConsensusPubkey.GetCachedValue().(*cometbftcrypto.PubKeyBn254); ok {
-			return pubKeyBn254.Address(), nil
-		}
 		return nil, fmt.Errorf("expecting cryptotypes.PubKey, got %T: invalid type", v.ConsensusPubkey.GetCachedValue())
 	}
 
-	return pubKey.Address(), nil
+	switch pk := pubKey.(type) {
+	case *ed25519.PubKey:
+		return pk.Address(), nil
+	case *secp256k1.PubKey:
+		return pk.Address(), nil
+	default:
+		return nil, fmt.Errorf("unsupported public key type: %T", pk)
+	}
 }
