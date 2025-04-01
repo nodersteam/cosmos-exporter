@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -72,7 +73,49 @@ func init() {
 		&ed25519.PubKey{},
 		&secp256k1.PubKey{},
 	)
+
+	// Регистрируем PubKeyBn254
+	interfaceRegistry.RegisterImplementations(
+		(*cryptotypes.PubKey)(nil),
+		&PubKeyBn254{},
+	)
+	interfaceRegistry.RegisterImplementations(
+		(*interface{})(nil),
+		&PubKeyBn254{},
+	)
 }
+
+// PubKeyBn254 представляет публичный ключ Bn254
+type PubKeyBn254 struct {
+	Key []byte
+}
+
+func (p *PubKeyBn254) Address() cryptotypes.Address {
+	return cryptotypes.Address(p.Key)
+}
+
+func (p *PubKeyBn254) Bytes() []byte {
+	return p.Key
+}
+
+func (p *PubKeyBn254) VerifySignature(msg []byte, sig []byte) bool {
+	return false // Не поддерживается
+}
+
+func (p *PubKeyBn254) Equals(other cryptotypes.PubKey) bool {
+	if other, ok := other.(*PubKeyBn254); ok {
+		return bytes.Equal(p.Key, other.Key)
+	}
+	return false
+}
+
+func (p *PubKeyBn254) Type() string {
+	return "bn254"
+}
+
+func (p *PubKeyBn254) ProtoMessage()  {}
+func (p *PubKeyBn254) Reset()         {}
+func (p *PubKeyBn254) String() string { return fmt.Sprintf("PubKeyBn254{%X}", p.Key) }
 
 var rootCmd = &cobra.Command{
 	Use:  "cosmos-exporter",
@@ -293,12 +336,15 @@ func setChainID() {
 
 	status, err := client.Status(context.Background())
 	if err != nil {
-		log.Warn().Err(err).Msg("Could not query CometBFT status, using default chain ID")
-		ChainID = "union"
-	} else {
-		log.Info().Str("network", status.NodeInfo.Network).Msg("Got network status from CometBFT")
-		ChainID = status.NodeInfo.Network
+		log.Fatal().Err(err).Msg("Could not query CometBFT status")
 	}
+
+	if status.NodeInfo.Network == "" {
+		log.Fatal().Msg("Chain ID is empty in CometBFT status")
+	}
+
+	ChainID = status.NodeInfo.Network
+	log.Info().Str("network", ChainID).Msg("Got network status from CometBFT")
 
 	ConstLabels = map[string]string{
 		"chain_id": ChainID,
