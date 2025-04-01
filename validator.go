@@ -656,25 +656,14 @@ func (v *ValidatorMetricsHandler) GetConsAddr(validator stakingtypes.Validator) 
 	}
 
 	// Для Bn254 ключей, значение уже является адресом
-	if validator.ConsensusPubkey.TypeUrl == "/cometbft.PubKeyBn254" {
+	if validator.ConsensusPubkey.TypeUrl == "/cosmos.crypto.bn254.PubKey" || validator.ConsensusPubkey.TypeUrl == "/cometbft.PubKeyBn254" {
 		return sdk.ConsAddress(validator.ConsensusPubkey.Value), nil
 	}
 
 	// Для стандартных ключей используем распаковку через интерфейс
 	var pubKey cryptotypes.PubKey
 	if err := interfaceRegistry.UnpackAny(validator.ConsensusPubkey, &pubKey); err != nil {
-		// Если не удалось распаковать как PubKey, пробуем как interface{}
-		var rawKey interface{}
-		if err := interfaceRegistry.UnpackAny(validator.ConsensusPubkey, &rawKey); err != nil {
-			return nil, fmt.Errorf("failed to unpack consensus public key for validator %s: %v", validator.OperatorAddress, err)
-		}
-
-		// Проверяем, является ли распакованное значение PubKey
-		if pk, ok := rawKey.(cryptotypes.PubKey); ok {
-			return sdk.ConsAddress(pk.Address()), nil
-		}
-
-		return nil, fmt.Errorf("consensus public key for validator %s is not a valid public key", validator.OperatorAddress)
+		return nil, fmt.Errorf("failed to unpack consensus public key for validator %s: %v", validator.OperatorAddress, err)
 	}
 
 	return sdk.ConsAddress(pubKey.Address()), nil
