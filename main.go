@@ -376,12 +376,9 @@ func checkAndHandleDenomInfoProvidedByUser() bool {
 	return false
 }
 
-// CreateConsAddress создает консенсусный адрес с правильным префиксом
+// CreateConsAddress создает консенсусный адрес
 func CreateConsAddress(addr []byte) sdk.ConsAddress {
-	config := sdk.GetConfig()
-	consAddr := sdk.ConsAddress(addr)
-	config.SetBech32PrefixForConsensusNode(ConsensusNodePrefix, ConsensusNodePubkeyPrefix)
-	return consAddr
+	return sdk.ConsAddress(addr)
 }
 
 func main() {
