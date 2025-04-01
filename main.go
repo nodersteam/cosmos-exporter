@@ -19,6 +19,8 @@ import (
 	"github.com/spf13/viper"
 
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 )
 
@@ -56,6 +58,11 @@ func init() {
 	interfaceRegistry.RegisterInterface(
 		"cosmos.crypto.PubKey",
 		(*cryptotypes.PubKey)(nil),
+	)
+	interfaceRegistry.RegisterImplementations(
+		(*cryptotypes.PubKey)(nil),
+		&ed25519.PubKey{},
+		&secp256k1.PubKey{},
 	)
 }
 

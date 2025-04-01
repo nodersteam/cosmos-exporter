@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -21,7 +20,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/rs/zerolog"
 )
+
+type ValidatorMetricsHandler struct {
+	logger *zerolog.Logger
+}
 
 func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
 	requestStart := time.Now()
@@ -195,6 +199,18 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 		Str("address", address).
 		Float64("request-time", time.Since(validatorQueryStart).Seconds()).
 		Msg("Finished querying validator")
+
+	metricsHandler := &ValidatorMetricsHandler{
+		logger: &sublogger,
+	}
+
+	if err := metricsHandler.Handle(validator); err != nil {
+		sublogger.Error().
+			Str("address", address).
+			Err(err).
+			Msg("Failed to handle validator metrics")
+		return
+	}
 
 	if value, err := strconv.ParseFloat(validator.Tokens.String(), 64); err != nil {
 		sublogger.Error().
@@ -489,7 +505,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			Msg("Started querying validator signing info")
 		queryStart := time.Now()
 
-		consAddr, err := validator.GetConsAddr()
+		consAddr, err := GetValidatorConsAddr(validator)
 		if err != nil {
 			sublogger.Error().
 				Str("address", validator.OperatorAddress).
@@ -626,22 +642,57 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 
 // GetValidatorConsAddr возвращает консенсусный адрес валидатора
 func GetValidatorConsAddr(v stakingtypes.Validator) ([]byte, error) {
-	if v.ConsensusPubkey == nil {
-		return nil, fmt.Errorf("validator consensus pubkey is nil")
+	handler := &ValidatorMetricsHandler{}
+	addr, err := handler.GetConsAddr(v)
+	if err != nil {
+		return nil, err
+	}
+	return addr.Bytes(), nil
+}
+
+func (v *ValidatorMetricsHandler) GetConsAddr(validator stakingtypes.Validator) (sdk.ConsAddress, error) {
+	if validator.ConsensusPubkey == nil {
+		return nil, fmt.Errorf("validator %s has no consensus public key", validator.OperatorAddress)
 	}
 
-	// Распаковываем публичный ключ
-	var pubKey cryptotypes.PubKey
-	if err := interfaceRegistry.UnpackAny(v.ConsensusPubkey, &pubKey); err != nil {
-		// Если не удалось распаковать как стандартный ключ, пробуем как Bn254
-		var bn254Key struct {
-			Address []byte `json:"address"`
-		}
-		if err := json.Unmarshal(v.ConsensusPubkey.Value, &bn254Key); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal Bn254 pubkey: %w", err)
-		}
-		return bn254Key.Address, nil
+	// Для Bn254 ключей, значение уже является адресом
+	if validator.ConsensusPubkey.TypeUrl == "/cometbft.PubKeyBn254" {
+		return sdk.ConsAddress(validator.ConsensusPubkey.Value), nil
 	}
 
-	return pubKey.Address(), nil
+	// Для стандартных ключей используем распаковку через интерфейс
+	var pubKey interface{}
+	if err := interfaceRegistry.UnpackAny(validator.ConsensusPubkey, &pubKey); err != nil {
+		return nil, fmt.Errorf("failed to unpack consensus public key for validator %s: %v", validator.OperatorAddress, err)
+	}
+
+	pk, ok := pubKey.(cryptotypes.PubKey)
+	if !ok {
+		return nil, fmt.Errorf("consensus public key for validator %s is not a valid public key", validator.OperatorAddress)
+	}
+
+	return sdk.ConsAddress(pk.Address()), nil
+}
+
+func (v *ValidatorMetricsHandler) Handle(validator stakingtypes.Validator) error {
+	sublogger := v.logger.With().
+		Str("validator", validator.OperatorAddress).
+		Logger()
+
+	queryStart := time.Now()
+
+	consAddr, err := GetValidatorConsAddr(validator)
+	if err != nil {
+		sublogger.Error().
+			Str("validator", validator.OperatorAddress).
+			Err(err).
+			Msg("Failed to get validator consensus address")
+		return err
+	}
+
+	// Используем consAddr и queryStart в дальнейшей логике
+	_ = consAddr
+	_ = queryStart
+
+	return nil
 }
