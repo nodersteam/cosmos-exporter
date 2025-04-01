@@ -23,7 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func getConsensusAddress(validator *stakingtypes.Validator) (string, error) {
+func getConsensusAddress(validator stakingtypes.Validator) (string, error) {
 	// Создаем HTTP клиент
 	client := &http.Client{
 		Timeout: 10 * time.Second,
