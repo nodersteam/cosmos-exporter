@@ -64,6 +64,11 @@ func init() {
 		&ed25519.PubKey{},
 		&secp256k1.PubKey{},
 	)
+	interfaceRegistry.RegisterImplementations(
+		(*interface{})(nil),
+		&ed25519.PubKey{},
+		&secp256k1.PubKey{},
+	)
 }
 
 var rootCmd = &cobra.Command{

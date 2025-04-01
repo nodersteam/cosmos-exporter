@@ -661,17 +661,23 @@ func (v *ValidatorMetricsHandler) GetConsAddr(validator stakingtypes.Validator) 
 	}
 
 	// Для стандартных ключей используем распаковку через интерфейс
-	var pubKey interface{}
+	var pubKey cryptotypes.PubKey
 	if err := interfaceRegistry.UnpackAny(validator.ConsensusPubkey, &pubKey); err != nil {
-		return nil, fmt.Errorf("failed to unpack consensus public key for validator %s: %v", validator.OperatorAddress, err)
-	}
+		// Если не удалось распаковать как PubKey, пробуем как interface{}
+		var rawKey interface{}
+		if err := interfaceRegistry.UnpackAny(validator.ConsensusPubkey, &rawKey); err != nil {
+			return nil, fmt.Errorf("failed to unpack consensus public key for validator %s: %v", validator.OperatorAddress, err)
+		}
 
-	pk, ok := pubKey.(cryptotypes.PubKey)
-	if !ok {
+		// Проверяем, является ли распакованное значение PubKey
+		if pk, ok := rawKey.(cryptotypes.PubKey); ok {
+			return sdk.ConsAddress(pk.Address()), nil
+		}
+
 		return nil, fmt.Errorf("consensus public key for validator %s is not a valid public key", validator.OperatorAddress)
 	}
 
-	return sdk.ConsAddress(pk.Address()), nil
+	return sdk.ConsAddress(pubKey.Address()), nil
 }
 
 func (v *ValidatorMetricsHandler) Handle(validator stakingtypes.Validator) error {
