@@ -18,8 +18,8 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
-	"github.com/cosmos/cosmos-sdk/codec/types"
-	"github.com/cosmos/cosmos-sdk/crypto/types"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 )
 
 var (
@@ -49,12 +49,13 @@ var (
 
 var log = zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
 
-var interfaceRegistry types.InterfaceRegistry
+var interfaceRegistry codectypes.InterfaceRegistry
 
 func init() {
-	interfaceRegistry = types.NewInterfaceRegistry()
-	interfaceRegistry.RegisterImplementations((*types.PubKey)(nil),
-		&types.PubKeyBn254{},
+	interfaceRegistry = codectypes.NewInterfaceRegistry()
+	interfaceRegistry.RegisterInterface(
+		"cosmos.crypto.PubKey",
+		(*cryptotypes.PubKey)(nil),
 	)
 }
 

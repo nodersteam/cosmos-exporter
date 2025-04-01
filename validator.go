@@ -12,6 +12,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
@@ -629,33 +630,18 @@ func GetValidatorConsAddr(v stakingtypes.Validator) ([]byte, error) {
 		return nil, fmt.Errorf("validator consensus pubkey is nil")
 	}
 
-	// Пробуем получить значение напрямую
-	switch v.ConsensusPubkey.TypeUrl {
-	case "/cosmos.crypto.ed25519.PubKey":
-		var pubKey struct {
-			Key []byte `json:"key"`
-		}
-		if err := json.Unmarshal(v.ConsensusPubkey.Value, &pubKey); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal ed25519 pubkey: %w", err)
-		}
-		return pubKey.Key, nil
-	case "/cosmos.crypto.secp256k1.PubKey":
-		var pubKey struct {
-			Key []byte `json:"key"`
-		}
-		if err := json.Unmarshal(v.ConsensusPubkey.Value, &pubKey); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal secp256k1 pubkey: %w", err)
-		}
-		return pubKey.Key, nil
-	case "/cometbft.crypto.PubKeyBn254":
-		var pubKey struct {
+	// Распаковываем публичный ключ
+	var pubKey cryptotypes.PubKey
+	if err := interfaceRegistry.UnpackAny(v.ConsensusPubkey, &pubKey); err != nil {
+		// Если не удалось распаковать как стандартный ключ, пробуем как Bn254
+		var bn254Key struct {
 			Address []byte `json:"address"`
 		}
-		if err := json.Unmarshal(v.ConsensusPubkey.Value, &pubKey); err != nil {
+		if err := json.Unmarshal(v.ConsensusPubkey.Value, &bn254Key); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal Bn254 pubkey: %w", err)
 		}
-		return pubKey.Address, nil
-	default:
-		return nil, fmt.Errorf("unsupported pubkey type: %s", v.ConsensusPubkey.TypeUrl)
+		return bn254Key.Address, nil
 	}
+
+	return pubKey.Address(), nil
 }
