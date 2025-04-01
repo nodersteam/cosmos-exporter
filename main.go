@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
+	tmjson "github.com/cometbft/cometbft/libs/json"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
@@ -83,6 +84,9 @@ func init() {
 		(*interface{})(nil),
 		&PubKeyBn254{},
 	)
+
+	// Регистрируем PubKeyBn254 для CometBFT
+	tmjson.RegisterType(&PubKeyBn254{}, "cometbft/PubKeyBn254")
 }
 
 // PubKeyBn254 представляет публичный ключ Bn254
@@ -334,16 +338,17 @@ func setChainID() {
 		log.Fatal().Err(err).Msg("Could not create CometBFT client")
 	}
 
-	status, err := client.Status(context.Background())
+	// Получаем ChainID через блокчейн
+	block, err := client.Block(context.Background(), nil)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Could not query CometBFT status")
+		log.Fatal().Err(err).Msg("Could not get block from CometBFT")
 	}
 
-	if status.NodeInfo.Network == "" {
-		log.Fatal().Msg("Chain ID is empty in CometBFT status")
+	if block.Block.ChainID == "" {
+		log.Fatal().Msg("Chain ID is empty in block")
 	}
 
-	ChainID = status.NodeInfo.Network
+	ChainID = block.Block.ChainID
 	log.Info().Str("network", ChainID).Msg("Got network status from CometBFT")
 
 	ConstLabels = map[string]string{
