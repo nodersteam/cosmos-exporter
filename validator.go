@@ -72,15 +72,13 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 
 	// Получаем информацию о подписях валидатора
 	slashingClient := slashingtypes.NewQueryClient(grpcConn)
-	signingInfo, err := slashingClient.SigningInfo(
-		context.Background(),
-		&slashingtypes.QuerySigningInfoRequest{
-			ConsAddress: sdk.ConsAddress(consAddr).String(),
-		},
-	)
+	signingInfoReq := &slashingtypes.QuerySigningInfoRequest{
+		ConsAddress: string(consAddr),
+	}
+	signingInfoResp, err := slashingClient.SigningInfo(r.Context(), signingInfoReq)
 	if err != nil {
-		log.Error().Err(err).Str("address", sdk.AccAddress(consAddr).String()).Str("request-id", requestID).Msg("Could not get validator signing info")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("Ошибка при получении информации о подписях валидатора: %v", err)
+		http.Error(w, "Ошибка при получении информации о подписях валидатора", http.StatusInternalServerError)
 		return
 	}
 
@@ -519,7 +517,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 		validatorMissedBlocksGauge.With(prometheus.Labels{
 			"moniker": validator.Description.Moniker,
 			"address": validator.OperatorAddress,
-		}).Set(float64(signingInfo.ValSigningInfo.MissedBlocksCounter))
+		}).Set(float64(signingInfoResp.ValSigningInfo.MissedBlocksCounter))
 	}()
 
 	wg.Add(1)
