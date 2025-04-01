@@ -75,7 +75,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 	signingInfo, err := slashingClient.SigningInfo(
 		context.Background(),
 		&slashingtypes.QuerySigningInfoRequest{
-			ConsAddress: ConsensusNodePrefix + sdk.AccAddress(consAddr).String()[len(AccountPrefix):],
+			ConsAddress: sdk.ConsAddress(consAddr).String(),
 		},
 	)
 	if err != nil {
@@ -652,7 +652,9 @@ func GetValidatorConsAddr(validator stakingtypes.Validator) ([]byte, error) {
 		return nil, fmt.Errorf("empty address from public key for validator %s", validator.OperatorAddress)
 	}
 
-	return addr, nil
+	// Создаем консенсусный адрес из байтов
+	consAddr := sdk.ConsAddress(addr)
+	return consAddr, nil
 }
 
 func (v *ValidatorMetricsHandler) Handle(validator stakingtypes.Validator) error {
