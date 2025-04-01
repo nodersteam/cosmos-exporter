@@ -198,7 +198,7 @@ func setChainID() {
 	}
 
 	// Формируем URL для запроса статуса
-	url := fmt.Sprintf("http://%s/status", Config.Node)
+	url := fmt.Sprintf("http://%s/status", NodeAddress)
 
 	// Выполняем HTTP запрос
 	resp, err := client.Get(url)
