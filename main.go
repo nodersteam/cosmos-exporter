@@ -189,18 +189,20 @@ func Execute(cmd *cobra.Command, args []string) {
 }
 
 func setChainID() {
-	client, err := tmrpc.New(TendermintRPC, "/websocket") // Вернули второй аргумент
+	client, err := tmrpc.New(TendermintRPC, "/websocket")
 	if err != nil {
 		log.Fatal().Err(err).Msg("Could not create CometBFT client")
 	}
 
 	status, err := client.Status(context.Background())
 	if err != nil {
-		log.Fatal().Err(err).Msg("Could not query CometBFT status")
+		log.Warn().Err(err).Msg("Could not query CometBFT status, using default chain ID")
+		ChainID = "union"
+	} else {
+		log.Info().Str("network", status.NodeInfo.Network).Msg("Got network status from CometBFT")
+		ChainID = status.NodeInfo.Network
 	}
 
-	log.Info().Str("network", status.NodeInfo.Network).Msg("Got network status from CometBFT")
-	ChainID = status.NodeInfo.Network
 	ConstLabels = map[string]string{
 		"chain_id": ChainID,
 	}

@@ -489,34 +489,33 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 		consAddr, err := validator.GetConsAddr()
 		if err != nil {
 			sublogger.Error().
-				Str("address", address).
+				Str("address", validator.OperatorAddress).
 				Err(err).
 				Msg("Could not get validator consensus address")
 			return
 		}
 
-		// Исправленный вызов с явным преобразованием
 		slashingClient := slashingtypes.NewQueryClient(grpcConn)
 		slashingRes, err := slashingClient.SigningInfo(
 			context.Background(),
-			&slashingtypes.QuerySigningInfoRequest{ConsAddress: string(consAddr)}, // Преобразование []byte в string
+			&slashingtypes.QuerySigningInfoRequest{ConsAddress: string(consAddr)},
 		)
 		if err != nil {
 			sublogger.Error().
-				Str("address", address).
+				Str("address", validator.OperatorAddress).
 				Err(err).
 				Msg("Could not get validator signing info")
 			return
 		}
 
 		sublogger.Debug().
-			Str("address", address).
+			Str("address", validator.OperatorAddress).
 			Float64("request-time", time.Since(queryStart).Seconds()).
 			Msg("Finished querying validator signing info")
 
 		validatorMissedBlocksGauge.With(prometheus.Labels{
 			"moniker": validator.Description.Moniker,
-			"address": address,
+			"address": validator.OperatorAddress,
 		}).Set(float64(slashingRes.ValSigningInfo.MissedBlocksCounter))
 	}()
 
@@ -578,7 +577,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 
 		validatorRankGauge.With(prometheus.Labels{
 			"moniker": validator.Description.Moniker,
-			"address": address,
+			"address": validator.OperatorAddress,
 		}).Set(float64(validatorRank))
 
 		paramsRes, err := stakingClient.Params(
