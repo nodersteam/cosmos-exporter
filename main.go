@@ -2,17 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"os"
-	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	tmrpc "github.com/cometbft/cometbft/rpc/client/http"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/prometheus/client_golang/prometheus"
@@ -192,65 +190,28 @@ func Execute(cmd *cobra.Command, args []string) {
 }
 
 func setChainID() {
-	// Создаем HTTP клиент
-	client := &http.Client{
-		Timeout: time.Second * 10,
-	}
-
-	// Формируем URL для запроса статуса
-	url := fmt.Sprintf("%s/status", TendermintRPC)
-
-	// Выполняем запрос
-	resp, err := client.Get(url)
+	client, err := tmrpc.New(TendermintRPC, "/websocket")
 	if err != nil {
-		log.Warn().
-			Err(err).
-			Msg("Could not query node status via HTTP, using default chain ID")
+		log.Warn().Err(err).Msg("Could not create CometBFT client")
 		ChainID = "union"
 		return
 	}
-	defer resp.Body.Close()
 
-	// Читаем тело ответа
-	body, err := io.ReadAll(resp.Body)
+	status, err := client.Status(context.Background())
 	if err != nil {
-		log.Warn().
-			Err(err).
-			Msg("Could not read status response, using default chain ID")
+		log.Warn().Err(err).Msg("Could not query CometBFT status, using default chain ID")
 		ChainID = "union"
 		return
 	}
 
-	// Парсим JSON ответ
-	var result struct {
-		Result struct {
-			NodeInfo struct {
-				Network string `json:"network"`
-			} `json:"node_info"`
-		} `json:"result"`
-	}
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		log.Warn().
-			Err(err).
-			Msg("Could not parse status response, using default chain ID")
-		ChainID = "union"
-		return
-	}
-
-	chainID := result.Result.NodeInfo.Network
-	if chainID == "" {
-		log.Warn().
-			Msg("Empty chain ID received from node, using default")
-		ChainID = "union"
+	if status.NodeInfo.Network != "" {
+		ChainID = status.NodeInfo.Network
+		log.Info().Str("chain_id", ChainID).Msg("Got chain ID from node_info.network")
 	} else {
-		log.Info().
-			Str("chain_id", chainID).
-			Msg("Got chain ID from node status")
-		ChainID = chainID
+		log.Warn().Msg("Chain ID not found in node_info.network, using default")
+		ChainID = "union"
 	}
 
-	// Обновляем метки для всех метрик
 	ConstLabels = prometheus.Labels{
 		"chain_id": ChainID,
 	}

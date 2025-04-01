@@ -10,6 +10,8 @@ import (
 
 	"google.golang.org/grpc"
 
+	"bytes"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
@@ -486,37 +488,38 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			Msg("Started querying validator signing info")
 		queryStart := time.Now()
 
-		consAddr, err := validator.GetConsAddr()
+		consAddr, err := validator.Validator.GetConsAddr()
 		if err != nil {
 			sublogger.Error().
-				Str("address", validator.OperatorAddress).
+				Str("address", validator.Validator.OperatorAddress).
 				Err(err).
-				Msg("Could not get validator consensus address")
-			return
+				Msg("Could not get validator consensus address, skipping consensus metrics")
+		} else {
+			var signingInfo slashingtypes.ValidatorSigningInfo
+			found := false
+			for _, signingInfoIterated := range signingInfos {
+				if bytes.Equal(consAddr, []byte(signingInfoIterated.Address)) {
+					found = true
+					signingInfo = signingInfoIterated
+					break
+				}
+			}
+
+			if !found {
+				sublogger.Debug().
+					Str("address", validator.Validator.OperatorAddress).
+					Msg("Could not get signing info for validator")
+			} else if validator.Validator.Status == stakingtypes.Bonded {
+				validatorMissedBlocksGauge.With(prometheus.Labels{
+					"address": validator.Validator.OperatorAddress,
+					"moniker": validator.Description.Moniker,
+				}).Set(float64(signingInfo.MissedBlocksCounter))
+			} else {
+				sublogger.Trace().
+					Str("address", validator.Validator.OperatorAddress).
+					Msg("Validator is not active, not returning missed blocks amount.")
+			}
 		}
-
-		slashingClient := slashingtypes.NewQueryClient(grpcConn)
-		slashingRes, err := slashingClient.SigningInfo(
-			context.Background(),
-			&slashingtypes.QuerySigningInfoRequest{ConsAddress: string(consAddr)},
-		)
-		if err != nil {
-			sublogger.Error().
-				Str("address", validator.OperatorAddress).
-				Err(err).
-				Msg("Could not get validator signing info")
-			return
-		}
-
-		sublogger.Debug().
-			Str("address", validator.OperatorAddress).
-			Float64("request-time", time.Since(queryStart).Seconds()).
-			Msg("Finished querying validator signing info")
-
-		validatorMissedBlocksGauge.With(prometheus.Labels{
-			"moniker": validator.Description.Moniker,
-			"address": validator.OperatorAddress,
-		}).Set(float64(slashingRes.ValSigningInfo.MissedBlocksCounter))
 	}()
 
 	wg.Add(1)
