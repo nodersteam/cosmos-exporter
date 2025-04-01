@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math"
 	"net/http"
 	"os"
-	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,14 +17,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
-
-	tmjson "github.com/cometbft/cometbft/libs/json"
-	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
-	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
-	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
-	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
-	querytypes "github.com/cosmos/cosmos-sdk/types/query"
-	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
 var (
@@ -55,71 +45,6 @@ var (
 )
 
 var log = zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
-
-var interfaceRegistry codectypes.InterfaceRegistry
-
-func init() {
-	interfaceRegistry = codectypes.NewInterfaceRegistry()
-	interfaceRegistry.RegisterInterface(
-		"cosmos.crypto.PubKey",
-		(*cryptotypes.PubKey)(nil),
-	)
-	interfaceRegistry.RegisterImplementations(
-		(*cryptotypes.PubKey)(nil),
-		&ed25519.PubKey{},
-		&secp256k1.PubKey{},
-	)
-	interfaceRegistry.RegisterImplementations(
-		(*interface{})(nil),
-		&ed25519.PubKey{},
-		&secp256k1.PubKey{},
-	)
-
-	// Регистрируем PubKeyBn254
-	interfaceRegistry.RegisterImplementations(
-		(*cryptotypes.PubKey)(nil),
-		&PubKeyBn254{},
-	)
-	interfaceRegistry.RegisterImplementations(
-		(*interface{})(nil),
-		&PubKeyBn254{},
-	)
-
-	// Регистрируем PubKeyBn254 для CometBFT
-	tmjson.RegisterType(&PubKeyBn254{}, "cometbft/PubKeyBn254")
-}
-
-// PubKeyBn254 представляет публичный ключ Bn254
-type PubKeyBn254 struct {
-	Key []byte
-}
-
-func (p *PubKeyBn254) Address() cryptotypes.Address {
-	return cryptotypes.Address(p.Key)
-}
-
-func (p *PubKeyBn254) Bytes() []byte {
-	return p.Key
-}
-
-func (p *PubKeyBn254) VerifySignature(msg []byte, sig []byte) bool {
-	return false // Не поддерживается
-}
-
-func (p *PubKeyBn254) Equals(other cryptotypes.PubKey) bool {
-	if other, ok := other.(*PubKeyBn254); ok {
-		return bytes.Equal(p.Key, other.Key)
-	}
-	return false
-}
-
-func (p *PubKeyBn254) Type() string {
-	return "bn254"
-}
-
-func (p *PubKeyBn254) ProtoMessage()  {}
-func (p *PubKeyBn254) Reset()         {}
-func (p *PubKeyBn254) String() string { return fmt.Sprintf("PubKeyBn254{%X}", p.Key) }
 
 var rootCmd = &cobra.Command{
 	Use:  "cosmos-exporter",
@@ -154,11 +79,6 @@ var rootCmd = &cobra.Command{
 }
 
 func setBechPrefixes(cmd *cobra.Command) {
-	// Если префиксы уже установлены (определены автоматически), не перезаписываем их
-	if AccountPrefix != "" {
-		return
-	}
-
 	if flag, err := cmd.Flags().GetString("bech-account-prefix"); flag != "" && err == nil {
 		AccountPrefix = flag
 	} else {
@@ -196,32 +116,6 @@ func setBechPrefixes(cmd *cobra.Command) {
 	}
 }
 
-// Определяем префиксы из адреса
-func determinePrefixesFromAddress(address string) (string, string, string) {
-	// Для валидаторского адреса (например, unionvaloper1...)
-	valPrefix := ""
-	if idx := strings.Index(address, "valoper"); idx != -1 {
-		valPrefix = address[:idx]
-	}
-
-	// Для аккаунта (например, union1...)
-	accPrefix := ""
-	if len(address) > 0 {
-		// Берем только базовый префикс, без суффиксов
-		accPrefix = valPrefix // Используем тот же префикс, что и для валидатора
-	}
-
-	// Для консенсусного адреса (например, unionvalcons1...)
-	consPrefix := ""
-	if idx := strings.Index(address, "valcons"); idx != -1 {
-		consPrefix = address[:idx]
-	} else {
-		consPrefix = valPrefix // Если не нашли valcons, используем тот же префикс
-	}
-
-	return accPrefix, valPrefix, consPrefix
-}
-
 func Execute(cmd *cobra.Command, args []string) {
 	logLevel, err := zerolog.ParseLevel(LogLevel)
 	if err != nil {
@@ -233,53 +127,6 @@ func Execute(cmd *cobra.Command, args []string) {
 	}
 
 	zerolog.SetGlobalLevel(logLevel)
-
-	// Получаем префиксы из первого запроса к валидатору
-	grpcConn, err := grpc.Dial(
-		NodeAddress,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Could not connect to gRPC node")
-	}
-	defer grpcConn.Close()
-
-	// Получаем список валидаторов для определения префиксов
-	stakingClient := stakingtypes.NewQueryClient(grpcConn)
-	validatorsResp, err := stakingClient.Validators(
-		context.Background(),
-		&stakingtypes.QueryValidatorsRequest{
-			Pagination: &querytypes.PageRequest{
-				Limit: 1,
-			},
-		},
-	)
-	if err != nil {
-		log.Warn().Err(err).Msg("Could not get validators list, using default prefixes")
-	} else if len(validatorsResp.Validators) > 0 {
-		valAddr := validatorsResp.Validators[0].OperatorAddress
-		accPrefix, valPrefix, consPrefix := determinePrefixesFromAddress(valAddr)
-
-		if accPrefix != "" {
-			AccountPrefix = accPrefix
-			AccountPubkeyPrefix = accPrefix + "pub"
-		}
-		if valPrefix != "" {
-			ValidatorPrefix = valPrefix + "valoper"
-			ValidatorPubkeyPrefix = valPrefix + "valoperpub"
-		}
-		if consPrefix != "" {
-			ConsensusNodePrefix = consPrefix + "valcons"
-			ConsensusNodePubkeyPrefix = consPrefix + "valconspub"
-		}
-
-		log.Info().
-			Str("valAddr", valAddr).
-			Str("accPrefix", accPrefix).
-			Str("valPrefix", valPrefix).
-			Str("consPrefix", consPrefix).
-			Msg("Determined prefixes from validator address")
-	}
 
 	log.Info().
 		Str("--bech-account-prefix", AccountPrefix).
@@ -301,6 +148,15 @@ func Execute(cmd *cobra.Command, args []string) {
 	config.SetBech32PrefixForValidator(ValidatorPrefix, ValidatorPubkeyPrefix)
 	config.SetBech32PrefixForConsensusNode(ConsensusNodePrefix, ConsensusNodePubkeyPrefix)
 	config.Seal()
+
+	grpcConn, err := grpc.Dial(
+		NodeAddress,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Could not connect to gRPC node")
+	}
+	defer grpcConn.Close()
 
 	setChainID()
 	setDenom(grpcConn)
@@ -338,18 +194,14 @@ func setChainID() {
 		log.Fatal().Err(err).Msg("Could not create CometBFT client")
 	}
 
-	// Получаем ChainID через блокчейн
-	block, err := client.Block(context.Background(), nil)
+	status, err := client.Status(context.Background())
 	if err != nil {
-		log.Fatal().Err(err).Msg("Could not get block from CometBFT")
+		log.Warn().Err(err).Msg("Could not query CometBFT status, using default chain ID")
+		ChainID = "union"
+	} else {
+		log.Info().Str("network", status.NodeInfo.Network).Msg("Got network status from CometBFT")
+		ChainID = status.NodeInfo.Network
 	}
-
-	if block.Block.ChainID == "" {
-		log.Fatal().Msg("Chain ID is empty in block")
-	}
-
-	ChainID = block.Block.ChainID
-	log.Info().Str("network", ChainID).Msg("Got network status from CometBFT")
 
 	ConstLabels = map[string]string{
 		"chain_id": ChainID,

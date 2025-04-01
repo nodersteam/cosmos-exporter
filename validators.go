@@ -258,9 +258,12 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 			"denom":   Denom,
 		}).Set(value / DenomCoefficient)
 
-		consAddr := GetValidatorConsAddr(&validator)
-		if consAddr == nil {
-			log.Printf("Не удалось получить консенсусный адрес валидатора")
+		consAddr, err := validator.GetConsAddr()
+		if err != nil {
+			sublogger.Error().
+				Str("address", validator.OperatorAddress).
+				Err(err).
+				Msg("Could not get validator consensus address")
 			continue
 		}
 
