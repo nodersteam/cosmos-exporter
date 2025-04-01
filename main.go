@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/cosmos/cosmos-sdk/codec/types"
+	"github.com/cosmos/cosmos-sdk/crypto/types"
 )
 
 var (
@@ -52,6 +53,9 @@ var interfaceRegistry types.InterfaceRegistry
 
 func init() {
 	interfaceRegistry = types.NewInterfaceRegistry()
+	interfaceRegistry.RegisterImplementations((*types.PubKey)(nil),
+		&types.PubKeyBn254{},
+	)
 }
 
 var rootCmd = &cobra.Command{

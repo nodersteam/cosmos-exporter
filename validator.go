@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -19,8 +20,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 )
 
 func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
@@ -630,16 +629,33 @@ func GetValidatorConsAddr(v stakingtypes.Validator) ([]byte, error) {
 		return nil, fmt.Errorf("validator consensus pubkey is nil")
 	}
 
-	pubKey, ok := v.ConsensusPubkey.GetCachedValue().(cryptotypes.PubKey)
-	if !ok {
-		// Пробуем получить ключ как cometbft/PubKeyBn254
-		if pubKeyBn254, ok := v.ConsensusPubkey.GetCachedValue().(struct {
-			Address []byte
-		}); ok {
-			return pubKeyBn254.Address, nil
+	// Пробуем получить значение напрямую
+	switch v.ConsensusPubkey.TypeUrl {
+	case "/cosmos.crypto.ed25519.PubKey":
+		var pubKey struct {
+			Key []byte `json:"key"`
 		}
-		return nil, fmt.Errorf("expecting cryptotypes.PubKey, got %T: invalid type", v.ConsensusPubkey.GetCachedValue())
+		if err := json.Unmarshal(v.ConsensusPubkey.Value, &pubKey); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal ed25519 pubkey: %w", err)
+		}
+		return pubKey.Key, nil
+	case "/cosmos.crypto.secp256k1.PubKey":
+		var pubKey struct {
+			Key []byte `json:"key"`
+		}
+		if err := json.Unmarshal(v.ConsensusPubkey.Value, &pubKey); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal secp256k1 pubkey: %w", err)
+		}
+		return pubKey.Key, nil
+	case "/cometbft.crypto.PubKeyBn254":
+		var pubKey struct {
+			Address []byte `json:"address"`
+		}
+		if err := json.Unmarshal(v.ConsensusPubkey.Value, &pubKey); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal Bn254 pubkey: %w", err)
+		}
+		return pubKey.Address, nil
+	default:
+		return nil, fmt.Errorf("unsupported pubkey type: %s", v.ConsensusPubkey.TypeUrl)
 	}
-
-	return pubKey.Address(), nil
 }
