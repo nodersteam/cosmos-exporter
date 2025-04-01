@@ -657,6 +657,10 @@ func (v *ValidatorMetricsHandler) GetConsAddr(validator stakingtypes.Validator) 
 
 	// Для Bn254 ключей, значение уже является адресом
 	if validator.ConsensusPubkey.TypeUrl == "/cosmos.crypto.bn254.PubKey" || validator.ConsensusPubkey.TypeUrl == "/cometbft.PubKeyBn254" {
+		// Проверяем, что значение не пустое
+		if len(validator.ConsensusPubkey.Value) == 0 {
+			return nil, fmt.Errorf("empty consensus public key value for validator %s", validator.OperatorAddress)
+		}
 		return sdk.ConsAddress(validator.ConsensusPubkey.Value), nil
 	}
 
