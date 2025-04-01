@@ -2,17 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"os"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	tmrpc "github.com/cometbft/cometbft/rpc/client/http"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -189,21 +192,56 @@ func Execute(cmd *cobra.Command, args []string) {
 }
 
 func setChainID() {
-	client, err := tmrpc.New(TendermintRPC, "/websocket")
-	if err != nil {
-		log.Fatal().Err(err).Msg("Could not create CometBFT client")
+	// Создаем HTTP клиент
+	client := &http.Client{
+		Timeout: time.Second * 10,
 	}
 
-	status, err := client.Status(context.Background())
+	// Формируем URL для запроса genesis
+	url := fmt.Sprintf("%s/genesis", TendermintRPC)
+
+	// Выполняем запрос
+	resp, err := client.Get(url)
 	if err != nil {
-		log.Warn().Err(err).Msg("Could not query CometBFT status, using default chain ID")
+		log.Warn().
+			Err(err).
+			Msg("Could not query genesis via HTTP, using default chain ID")
 		ChainID = "union"
 	} else {
-		log.Info().Str("network", status.NodeInfo.Network).Msg("Got network status from CometBFT")
-		ChainID = status.NodeInfo.Network
+		defer resp.Body.Close()
+
+		// Читаем тело ответа
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Warn().
+				Err(err).
+				Msg("Could not read genesis response, using default chain ID")
+			ChainID = "union"
+		} else {
+			// Парсим JSON ответ
+			var result struct {
+				Result struct {
+					Genesis struct {
+						ChainID string `json:"chain_id"`
+					} `json:"genesis"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(body, &result); err != nil {
+				log.Warn().
+					Err(err).
+					Msg("Could not parse genesis response, using default chain ID")
+				ChainID = "union"
+			} else {
+				log.Info().
+					Str("chain_id", result.Result.Genesis.ChainID).
+					Msg("Got chain ID from genesis")
+				ChainID = result.Result.Genesis.ChainID
+			}
+		}
 	}
 
-	ConstLabels = map[string]string{
+	// Обновляем метки для всех метрик
+	ConstLabels = prometheus.Labels{
 		"chain_id": ChainID,
 	}
 }
