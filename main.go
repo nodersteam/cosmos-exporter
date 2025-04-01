@@ -10,7 +10,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	cometbftcrypto "github.com/cometbft/cometbft/crypto"
 	tmrpc "github.com/cometbft/cometbft/rpc/client/http"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
@@ -20,8 +19,6 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/cosmos/cosmos-sdk/codec/types"
-	"github.com/cosmos/cosmos-sdk/crypto/types"
-	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 )
 
 var (
@@ -55,9 +52,6 @@ var interfaceRegistry types.InterfaceRegistry
 
 func init() {
 	interfaceRegistry = types.NewInterfaceRegistry()
-	interfaceRegistry.RegisterImplementations((*cryptotypes.PubKey)(nil),
-		&cometbftcrypto.PubKeyBn254{},
-	)
 }
 
 var rootCmd = &cobra.Command{

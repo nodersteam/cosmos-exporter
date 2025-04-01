@@ -20,8 +20,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
-	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 )
 
@@ -626,23 +624,22 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 		Msg("Request processed")
 }
 
-// GetValidatorConsAddr returns the consensus address of a validator
+// GetValidatorConsAddr возвращает консенсусный адрес валидатора
 func GetValidatorConsAddr(v stakingtypes.Validator) ([]byte, error) {
 	if v.ConsensusPubkey == nil {
-		return nil, fmt.Errorf("consensus public key is nil")
+		return nil, fmt.Errorf("validator consensus pubkey is nil")
 	}
 
 	pubKey, ok := v.ConsensusPubkey.GetCachedValue().(cryptotypes.PubKey)
 	if !ok {
+		// Пробуем получить ключ как cometbft/PubKeyBn254
+		if pubKeyBn254, ok := v.ConsensusPubkey.GetCachedValue().(struct {
+			Address []byte
+		}); ok {
+			return pubKeyBn254.Address, nil
+		}
 		return nil, fmt.Errorf("expecting cryptotypes.PubKey, got %T: invalid type", v.ConsensusPubkey.GetCachedValue())
 	}
 
-	switch pk := pubKey.(type) {
-	case *ed25519.PubKey:
-		return pk.Address(), nil
-	case *secp256k1.PubKey:
-		return pk.Address(), nil
-	default:
-		return nil, fmt.Errorf("unsupported public key type: %T", pk)
-	}
+	return pubKey.Address(), nil
 }
