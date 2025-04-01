@@ -72,11 +72,6 @@ func init() {
 		&ed25519.PubKey{},
 		&secp256k1.PubKey{},
 	)
-
-	// Устанавливаем префиксы для сети Union
-	sdk.GetConfig().SetBech32PrefixForAccount("union", "unionpub")
-	sdk.GetConfig().SetBech32PrefixForValidator("unionvaloper", "unionvaloperpub")
-	sdk.GetConfig().SetBech32PrefixForConsensusNode("unionvalcons", "unionvalconspub")
 }
 
 var rootCmd = &cobra.Command{
@@ -165,13 +160,16 @@ func determinePrefixesFromAddress(address string) (string, string, string) {
 	// Для аккаунта (например, union1...)
 	accPrefix := ""
 	if len(address) > 0 {
-		accPrefix = address[:len(address)-1]
+		// Берем только базовый префикс, без суффиксов
+		accPrefix = valPrefix // Используем тот же префикс, что и для валидатора
 	}
 
 	// Для консенсусного адреса (например, unionvalcons1...)
 	consPrefix := ""
 	if idx := strings.Index(address, "valcons"); idx != -1 {
 		consPrefix = address[:idx]
+	} else {
+		consPrefix = valPrefix // Если не нашли valcons, используем тот же префикс
 	}
 
 	return accPrefix, valPrefix, consPrefix
@@ -227,6 +225,13 @@ func Execute(cmd *cobra.Command, args []string) {
 			ConsensusNodePrefix = consPrefix + "valcons"
 			ConsensusNodePubkeyPrefix = consPrefix + "valconspub"
 		}
+
+		log.Info().
+			Str("valAddr", valAddr).
+			Str("accPrefix", accPrefix).
+			Str("valPrefix", valPrefix).
+			Str("consPrefix", consPrefix).
+			Msg("Determined prefixes from validator address")
 	}
 
 	log.Info().
