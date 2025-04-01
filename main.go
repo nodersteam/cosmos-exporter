@@ -197,8 +197,8 @@ func setChainID() {
 		Timeout: 10 * time.Second,
 	}
 
-	// Формируем URL для запроса статуса
-	url := fmt.Sprintf("http://%s/status", NodeAddress)
+	// Формируем URL для запроса статуса через Tendermint RPC
+	url := fmt.Sprintf("%s/status", TendermintRPC)
 
 	// Выполняем HTTP запрос
 	resp, err := client.Get(url)
