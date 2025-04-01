@@ -376,6 +376,14 @@ func checkAndHandleDenomInfoProvidedByUser() bool {
 	return false
 }
 
+// CreateConsAddress создает консенсусный адрес с правильным префиксом
+func CreateConsAddress(addr []byte) sdk.ConsAddress {
+	config := sdk.GetConfig()
+	consAddr := sdk.ConsAddress(addr)
+	config.SetBech32PrefixForConsensusNode(ConsensusNodePrefix, ConsensusNodePubkeyPrefix)
+	return consAddr
+}
+
 func main() {
 	rootCmd.PersistentFlags().StringVar(&ConfigPath, "config", "", "Config file path")
 	rootCmd.PersistentFlags().StringVar(&Denom, "denom", "", "Cosmos coin denom")
