@@ -671,7 +671,13 @@ func (v *ValidatorMetricsHandler) GetConsAddr(validator stakingtypes.Validator) 
 		return nil, fmt.Errorf("failed to unpack consensus public key for validator %s: %v", validator.OperatorAddress, err)
 	}
 
-	return sdk.ConsAddress(pubKey.Address()), nil
+	// Получаем адрес из публичного ключа
+	addr := pubKey.Address()
+	if len(addr) == 0 {
+		return nil, fmt.Errorf("empty address from public key for validator %s", validator.OperatorAddress)
+	}
+
+	return sdk.ConsAddress(addr), nil
 }
 
 func (v *ValidatorMetricsHandler) Handle(validator stakingtypes.Validator) error {

@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -22,6 +23,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
+	querytypes "github.com/cosmos/cosmos-sdk/types/query"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
 var (
@@ -69,6 +72,11 @@ func init() {
 		&ed25519.PubKey{},
 		&secp256k1.PubKey{},
 	)
+
+	// Устанавливаем префиксы для сети Union
+	sdk.GetConfig().SetBech32PrefixForAccount("union", "unionpub")
+	sdk.GetConfig().SetBech32PrefixForValidator("unionvaloper", "unionvaloperpub")
+	sdk.GetConfig().SetBech32PrefixForConsensusNode("unionvalcons", "unionvalconspub")
 }
 
 var rootCmd = &cobra.Command{
@@ -104,6 +112,11 @@ var rootCmd = &cobra.Command{
 }
 
 func setBechPrefixes(cmd *cobra.Command) {
+	// Если префиксы уже установлены (определены автоматически), не перезаписываем их
+	if AccountPrefix != "" {
+		return
+	}
+
 	if flag, err := cmd.Flags().GetString("bech-account-prefix"); flag != "" && err == nil {
 		AccountPrefix = flag
 	} else {
@@ -141,6 +154,29 @@ func setBechPrefixes(cmd *cobra.Command) {
 	}
 }
 
+// Определяем префиксы из адреса
+func determinePrefixesFromAddress(address string) (string, string, string) {
+	// Для валидаторского адреса (например, unionvaloper1...)
+	valPrefix := ""
+	if idx := strings.Index(address, "valoper"); idx != -1 {
+		valPrefix = address[:idx]
+	}
+
+	// Для аккаунта (например, union1...)
+	accPrefix := ""
+	if len(address) > 0 {
+		accPrefix = address[:len(address)-1]
+	}
+
+	// Для консенсусного адреса (например, unionvalcons1...)
+	consPrefix := ""
+	if idx := strings.Index(address, "valcons"); idx != -1 {
+		consPrefix = address[:idx]
+	}
+
+	return accPrefix, valPrefix, consPrefix
+}
+
 func Execute(cmd *cobra.Command, args []string) {
 	logLevel, err := zerolog.ParseLevel(LogLevel)
 	if err != nil {
@@ -152,6 +188,46 @@ func Execute(cmd *cobra.Command, args []string) {
 	}
 
 	zerolog.SetGlobalLevel(logLevel)
+
+	// Получаем префиксы из первого запроса к валидатору
+	grpcConn, err := grpc.Dial(
+		NodeAddress,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Could not connect to gRPC node")
+	}
+	defer grpcConn.Close()
+
+	// Получаем список валидаторов для определения префиксов
+	stakingClient := stakingtypes.NewQueryClient(grpcConn)
+	validatorsResp, err := stakingClient.Validators(
+		context.Background(),
+		&stakingtypes.QueryValidatorsRequest{
+			Pagination: &querytypes.PageRequest{
+				Limit: 1,
+			},
+		},
+	)
+	if err != nil {
+		log.Warn().Err(err).Msg("Could not get validators list, using default prefixes")
+	} else if len(validatorsResp.Validators) > 0 {
+		valAddr := validatorsResp.Validators[0].OperatorAddress
+		accPrefix, valPrefix, consPrefix := determinePrefixesFromAddress(valAddr)
+
+		if accPrefix != "" {
+			AccountPrefix = accPrefix
+			AccountPubkeyPrefix = accPrefix + "pub"
+		}
+		if valPrefix != "" {
+			ValidatorPrefix = valPrefix + "valoper"
+			ValidatorPubkeyPrefix = valPrefix + "valoperpub"
+		}
+		if consPrefix != "" {
+			ConsensusNodePrefix = consPrefix + "valcons"
+			ConsensusNodePubkeyPrefix = consPrefix + "valconspub"
+		}
+	}
 
 	log.Info().
 		Str("--bech-account-prefix", AccountPrefix).
@@ -173,15 +249,6 @@ func Execute(cmd *cobra.Command, args []string) {
 	config.SetBech32PrefixForValidator(ValidatorPrefix, ValidatorPubkeyPrefix)
 	config.SetBech32PrefixForConsensusNode(ConsensusNodePrefix, ConsensusNodePubkeyPrefix)
 	config.Seal()
-
-	grpcConn, err := grpc.Dial(
-		NodeAddress,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Could not connect to gRPC node")
-	}
-	defer grpcConn.Close()
 
 	setChainID()
 	setDenom(grpcConn)
