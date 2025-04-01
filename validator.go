@@ -75,7 +75,7 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 	signingInfo, err := slashingClient.SigningInfo(
 		context.Background(),
 		&slashingtypes.QuerySigningInfoRequest{
-			ConsAddress: sdk.AccAddress(consAddr).String(),
+			ConsAddress: CreateConsAddress(consAddr).String(),
 		},
 	)
 	if err != nil {
