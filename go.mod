@@ -1,8 +1,6 @@
 module github.com/noders-team/cosmos-exporter
 
-go 1.23.5
-
-toolchain go1.23.7
+go 1.22
 
 require (
 	github.com/cometbft/cometbft v0.38.12 // indirect
