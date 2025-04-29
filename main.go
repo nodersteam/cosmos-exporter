@@ -121,6 +121,24 @@ func setBechPrefixes(cmd *cobra.Command) {
 	}
 }
 
+func determineNetworkType(grpcConn *grpc.ClientConn) (string, error) {
+	// Пробуем получить параметры через staking
+	stakingClient := stakingtypes.NewQueryClient(grpcConn)
+	_, err := stakingClient.Params(context.Background(), &stakingtypes.QueryParamsRequest{})
+	if err == nil {
+		return "cosmos", nil
+	}
+
+	// Если staking не работает, пробуем validation
+	validationClient := NewValidationClient(grpcConn)
+	_, err = validationClient.Params(context.Background(), &QueryParamsRequest{})
+	if err == nil {
+		return "zenrock", nil
+	}
+
+	return "", fmt.Errorf("не удалось определить тип сети")
+}
+
 func Execute(cmd *cobra.Command, args []string) {
 	logLevel, err := zerolog.ParseLevel(LogLevel)
 	if err != nil {
@@ -165,6 +183,16 @@ func Execute(cmd *cobra.Command, args []string) {
 
 	setChainID()
 	setDenom(grpcConn)
+
+	// Определяем тип сети автоматически, если не указан явно
+	if NetworkType == "" {
+		networkType, err := determineNetworkType(grpcConn)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Could not determine network type")
+		}
+		NetworkType = networkType
+		log.Info().Str("network-type", NetworkType).Msg("Network type determined automatically")
+	}
 
 	var validationClient interface{}
 	if NetworkType == "zenrock" {
@@ -338,7 +366,7 @@ func main() {
 	rootCmd.PersistentFlags().Uint64Var(&Limit, "limit", 1000, "Pagination limit for gRPC requests")
 	rootCmd.PersistentFlags().StringVar(&TendermintRPC, "tendermint-rpc", "http://localhost:26657", "Tendermint RPC address")
 	rootCmd.PersistentFlags().BoolVar(&JsonOutput, "json", false, "Output logs as JSON")
-	rootCmd.PersistentFlags().StringVar(&NetworkType, "network-type", "cosmos", "Network type (cosmos or zenrock)")
+	rootCmd.PersistentFlags().StringVar(&NetworkType, "network-type", "", "Network type (cosmos or zenrock). If not specified, will be determined automatically")
 
 	rootCmd.PersistentFlags().StringVar(&Prefix, "bech-prefix", "persistence", "Bech32 global prefix")
 	rootCmd.PersistentFlags().StringVar(&AccountPrefix, "bech-account-prefix", "", "Bech32 account prefix")
