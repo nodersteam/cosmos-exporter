@@ -15,6 +15,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
@@ -122,17 +123,44 @@ func setBechPrefixes(cmd *cobra.Command) {
 }
 
 func determineNetworkType(grpcConn *grpc.ClientConn) (string, error) {
+	// Создаем контекст с таймаутом
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	// Пробуем получить параметры через staking
 	stakingClient := stakingtypes.NewQueryClient(grpcConn)
-	_, err := stakingClient.Params(context.Background(), &stakingtypes.QueryParamsRequest{})
+	_, err := stakingClient.Params(ctx, &stakingtypes.QueryParamsRequest{})
 	if err == nil {
 		return "cosmos", nil
 	}
+	log.Debug().Err(err).Msg("Failed to get staking params")
 
-	// Если staking не работает, пробуем validation
-	validationClient := NewValidationClient(grpcConn)
-	_, err = validationClient.Params(context.Background(), &QueryParamsRequest{})
+	// Пробуем получить параметры через bank
+	bankClient := banktypes.NewQueryClient(grpcConn)
+	_, err = bankClient.Params(ctx, &banktypes.QueryParamsRequest{})
 	if err == nil {
+		return "cosmos", nil
+	}
+	log.Debug().Err(err).Msg("Failed to get bank params")
+
+	// Пробуем получить параметры через mint
+	mintClient := minttypes.NewQueryClient(grpcConn)
+	_, err = mintClient.Params(ctx, &minttypes.QueryParamsRequest{})
+	if err == nil {
+		return "cosmos", nil
+	}
+	log.Debug().Err(err).Msg("Failed to get mint params")
+
+	// Если все Cosmos SDK модули не работают, пробуем validation
+	validationClient := NewValidationClient(grpcConn)
+	_, err = validationClient.Params(ctx, &QueryParamsRequest{})
+	if err == nil {
+		return "zenrock", nil
+	}
+	log.Debug().Err(err).Msg("Failed to get validation params")
+
+	// Если ничего не сработало, проверяем chain_id
+	if ChainID == "diamond-1" {
 		return "zenrock", nil
 	}
 
