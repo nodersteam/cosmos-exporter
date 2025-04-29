@@ -12,10 +12,10 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/cosmos/cosmos-sdk/types/anypb"
-	querytypes "github.com/cosmos/cosmos-sdk/types/query"
-	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
-	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+	"github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/query"
+	"github.com/cosmos/cosmos-sdk/x/slashing/types/slashing"
+	"github.com/cosmos/cosmos-sdk/x/staking/types/staking"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -120,8 +120,8 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 	registry.MustRegister(validatorsRankGauge)
 	registry.MustRegister(validatorsIsActiveGauge)
 
-	var validators []stakingtypes.Validator
-	var signingInfos []slashingtypes.ValidatorSigningInfo
+	var validators []staking.Validator
+	var signingInfos []slashing.ValidatorSigningInfo
 	var validatorSetLength uint32
 
 	var wg sync.WaitGroup
@@ -142,11 +142,11 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 				&QueryValidatorsRequest{},
 			)
 		} else {
-			client := validationClient.(stakingtypes.QueryClient)
+			client := validationClient.(staking.QueryClient)
 			validatorsResponse, err = client.Validators(
 				context.Background(),
-				&stakingtypes.QueryValidatorsRequest{
-					Pagination: &querytypes.PageRequest{
+				&staking.QueryValidatorsRequest{
+					Pagination: &query.PageRequest{
 						Limit: Limit,
 					},
 				},
@@ -164,25 +164,25 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 
 		if NetworkType == "zenrock" {
 			res := validatorsResponse.(*QueryValidatorsResponse)
-			validators = make([]stakingtypes.Validator, len(res.Validators))
+			validators = make([]staking.Validator, len(res.Validators))
 			for i, v := range res.Validators {
-				validators[i] = stakingtypes.Validator{
+				validators[i] = staking.Validator{
 					OperatorAddress: v.OperatorAddress,
-					ConsensusPubkey: &anypb.Any{
+					ConsensusPubkey: &types.Any{
 						TypeUrl: "/cosmos.crypto.ed25519.PubKey",
 						Value:   []byte(v.ConsensusPubkey),
 					},
 					Jailed:          v.Jailed,
-					Status:          stakingtypes.BondStatus(stakingtypes.BondStatus_value[v.Status]),
+					Status:          staking.BondStatus(staking.BondStatus_value[v.Status]),
 					Tokens:          sdk.NewIntFromString(v.Tokens),
 					DelegatorShares: sdk.NewDecFromStr(v.DelegatorShares),
-					Description: stakingtypes.Description{
+					Description: staking.Description{
 						Moniker: v.Description.Moniker,
 					},
 				}
 			}
 		} else {
-			res := validatorsResponse.(*stakingtypes.QueryValidatorsResponse)
+			res := validatorsResponse.(*staking.QueryValidatorsResponse)
 			validators = res.Validators
 		}
 
@@ -197,11 +197,11 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		sublogger.Debug().Msg("Started querying validators signing infos")
 		queryStart := time.Now()
 
-		slashingClient := slashingtypes.NewQueryClient(grpcConn)
+		slashingClient := slashing.NewQueryClient(grpcConn)
 		signingInfosResponse, err := slashingClient.SigningInfos(
 			context.Background(),
-			&slashingtypes.QuerySigningInfosRequest{
-				Pagination: &querytypes.PageRequest{
+			&slashing.QuerySigningInfosRequest{
+				Pagination: &query.PageRequest{
 					Limit: Limit,
 				},
 			},
@@ -225,10 +225,10 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		sublogger.Debug().Msg("Started querying staking params")
 		queryStart := time.Now()
 
-		stakingClient := stakingtypes.NewQueryClient(grpcConn)
+		stakingClient := staking.NewQueryClient(grpcConn)
 		paramsResponse, err := stakingClient.Params(
 			context.Background(),
-			&stakingtypes.QueryParamsRequest{},
+			&staking.QueryParamsRequest{},
 		)
 		if err != nil {
 			sublogger.Error().
@@ -303,7 +303,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 			continue
 		}
 
-		var signingInfo slashingtypes.ValidatorSigningInfo
+		var signingInfo slashing.ValidatorSigningInfo
 		found := false
 		for _, signingInfoIterated := range signingInfos {
 			if bytes.Equal(consAddr, []byte(signingInfoIterated.Address)) {
@@ -317,7 +317,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 			sublogger.Debug().
 				Str("address", validator.OperatorAddress).
 				Msg("Could not get signing info for validator")
-		} else if validator.Status == stakingtypes.Bonded {
+		} else if validator.Status == staking.Bonded {
 			validatorsMissedBlocksGauge.With(prometheus.Labels{
 				"address": validator.OperatorAddress,
 				"moniker": moniker,

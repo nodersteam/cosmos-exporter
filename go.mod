@@ -5,7 +5,7 @@ go 1.22
 require (
 	github.com/cometbft/cometbft v0.38.12 // indirect
 	github.com/cometbft/cometbft-db v1.0.1 // indirect; Совместима с v0.38.12
-	github.com/cosmos/cosmos-sdk v0.50.12
+	github.com/cosmos/cosmos-sdk v0.50.13
 	github.com/cosmos/gogoproto v1.7.0 // indirect
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.20.5
