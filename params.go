@@ -18,7 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
+func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn, validationClient interface{}) {
 	requestStart := time.Now()
 
 	sublogger := log.With().
@@ -167,27 +167,52 @@ func ParamsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		sublogger.Debug().Msg("Started querying global staking params")
+		sublogger.Debug().Msg("Started querying staking params")
 		queryStart := time.Now()
 
-		stakingClient := stakingtypes.NewQueryClient(grpcConn)
-		paramsResponse, err := stakingClient.Params(
-			context.Background(),
-			&stakingtypes.QueryParamsRequest{},
-		)
+		var paramsResponse interface{}
+		var err error
+
+		if NetworkType == "zenrock" {
+			client := validationClient.(ValidationClient)
+			paramsResponse, err = client.Params(
+				context.Background(),
+				&QueryParamsRequest{},
+			)
+		} else {
+			client := validationClient.(stakingtypes.QueryClient)
+			paramsResponse, err = client.Params(
+				context.Background(),
+				&stakingtypes.QueryParamsRequest{},
+			)
+		}
+
 		if err != nil {
 			sublogger.Error().
 				Err(err).
-				Msg("Could not get global staking params")
+				Msg("Could not get staking params")
 			return
 		}
 
 		sublogger.Debug().
 			Float64("request-time", time.Since(queryStart).Seconds()).
-			Msg("Finished querying global staking params")
+			Msg("Finished querying staking params")
 
-		paramsMaxValidatorsGauge.Set(float64(paramsResponse.Params.MaxValidators))
-		paramsUnbondingTimeGauge.Set(paramsResponse.Params.UnbondingTime.Seconds())
+		if NetworkType == "zenrock" {
+			res := paramsResponse.(*QueryParamsResponse)
+			paramsMaxValidatorsGauge.Set(float64(res.Params.MaxValidators))
+			if value, err := strconv.ParseFloat(res.Params.UnbondingTime, 64); err != nil {
+				sublogger.Error().
+					Err(err).
+					Msg("Could not parse unbonding time")
+			} else {
+				paramsUnbondingTimeGauge.Set(value)
+			}
+		} else {
+			res := paramsResponse.(*stakingtypes.QueryParamsResponse)
+			paramsMaxValidatorsGauge.Set(float64(res.Params.MaxValidators))
+			paramsUnbondingTimeGauge.Set(res.Params.UnbondingTime.Seconds())
+		}
 	}()
 
 	wg.Add(1)

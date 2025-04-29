@@ -18,7 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
+func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn, validationClient interface{}) {
 	requestStart := time.Now()
 
 	sublogger := log.With().
@@ -132,11 +132,23 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			Msg("Started querying delegations")
 		queryStart := time.Now()
 
-		stakingClient := stakingtypes.NewQueryClient(grpcConn)
-		stakingRes, err := stakingClient.DelegatorDelegations(
-			context.Background(),
-			&stakingtypes.QueryDelegatorDelegationsRequest{DelegatorAddr: myAddress.String()},
-		)
+		var stakingRes interface{}
+		var err error
+
+		if NetworkType == "zenrock" {
+			client := validationClient.(ValidationClient)
+			stakingRes, err = client.DelegatorDelegations(
+				context.Background(),
+				&QueryDelegatorDelegationsRequest{DelegatorAddr: myAddress.String()},
+			)
+		} else {
+			client := validationClient.(stakingtypes.QueryClient)
+			stakingRes, err = client.DelegatorDelegations(
+				context.Background(),
+				&stakingtypes.QueryDelegatorDelegationsRequest{DelegatorAddr: myAddress.String()},
+			)
+		}
+
 		if err != nil {
 			sublogger.Error().
 				Str("address", address).
@@ -150,13 +162,28 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			Float64("request-time", time.Since(queryStart).Seconds()).
 			Msg("Finished querying delegations")
 
-		for _, delegation := range stakingRes.DelegationResponses {
-			value, _ := new(big.Float).SetInt(delegation.Balance.Amount.BigInt()).Float64()
-			walletDelegationGauge.With(prometheus.Labels{
-				"address":      address,
-				"denom":        delegation.Balance.Denom, // Используем реальный denom
-				"delegated_to": delegation.Delegation.ValidatorAddress,
-			}).Set(value / DenomCoefficient)
+		// Обработка ответа в зависимости от типа сети
+		if NetworkType == "zenrock" {
+			res := stakingRes.(*QueryDelegatorDelegationsResponse)
+			for _, delegation := range res.DelegationResponses {
+				value, _ := new(big.Float).SetString(delegation.Balance.Amount)
+				floatValue, _ := value.Float64()
+				walletDelegationGauge.With(prometheus.Labels{
+					"address":      address,
+					"denom":        delegation.Balance.Denom,
+					"delegated_to": delegation.Delegation.ValidatorAddress,
+				}).Set(floatValue / DenomCoefficient)
+			}
+		} else {
+			res := stakingRes.(*stakingtypes.QueryDelegatorDelegationsResponse)
+			for _, delegation := range res.DelegationResponses {
+				value, _ := new(big.Float).SetInt(delegation.Balance.Amount.BigInt()).Float64()
+				walletDelegationGauge.With(prometheus.Labels{
+					"address":      address,
+					"denom":        delegation.Balance.Denom,
+					"delegated_to": delegation.Delegation.ValidatorAddress,
+				}).Set(value / DenomCoefficient)
+			}
 		}
 	}()
 

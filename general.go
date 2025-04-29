@@ -18,7 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
+func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn, validationClient interface{}) {
 	requestStart := time.Now()
 
 	sublogger := log.With().
@@ -92,11 +92,23 @@ func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Clien
 		sublogger.Debug().Msg("Started querying staking pool")
 		queryStart := time.Now()
 
-		stakingClient := stakingtypes.NewQueryClient(grpcConn)
-		response, err := stakingClient.Pool(
-			context.Background(),
-			&stakingtypes.QueryPoolRequest{},
-		)
+		var response interface{}
+		var err error
+
+		if NetworkType == "zenrock" {
+			client := validationClient.(ValidationClient)
+			response, err = client.Pool(
+				context.Background(),
+				&QueryPoolRequest{},
+			)
+		} else {
+			client := validationClient.(stakingtypes.QueryClient)
+			response, err = client.Pool(
+				context.Background(),
+				&stakingtypes.QueryPoolRequest{},
+			)
+		}
+
 		if err != nil {
 			sublogger.Error().Err(err).Msg("Could not get staking pool")
 			return
@@ -106,8 +118,15 @@ func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Clien
 			Float64("request-time", time.Since(queryStart).Seconds()).
 			Msg("Finished querying staking pool")
 
-		generalBondedTokensGauge.Set(float64(response.Pool.BondedTokens.Int64()))
-		generalNotBondedTokensGauge.Set(float64(response.Pool.NotBondedTokens.Int64()))
+		if NetworkType == "zenrock" {
+			res := response.(*QueryPoolResponse)
+			generalBondedTokensGauge.Set(float64(res.Pool.BondedTokens))
+			generalNotBondedTokensGauge.Set(float64(res.Pool.NotBondedTokens))
+		} else {
+			res := response.(*stakingtypes.QueryPoolResponse)
+			generalBondedTokensGauge.Set(float64(res.Pool.BondedTokens.Int64()))
+			generalNotBondedTokensGauge.Set(float64(res.Pool.NotBondedTokens.Int64()))
+		}
 	}()
 
 	wg.Add(1)

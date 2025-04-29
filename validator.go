@@ -72,7 +72,7 @@ func getConsensusAddress(validator stakingtypes.Validator) (string, error) {
 	return "", fmt.Errorf("validator not found")
 }
 
-func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
+func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn, validationClient interface{}) {
 	requestStart := time.Now()
 	sublogger := log.With().
 		Str("request-id", uuid.New().String()).
@@ -309,16 +309,28 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			Msg("Started querying validator delegations")
 		queryStart := time.Now()
 
-		stakingClient := stakingtypes.NewQueryClient(grpcConn)
-		stakingRes, err := stakingClient.ValidatorDelegations(
-			context.Background(),
-			&stakingtypes.QueryValidatorDelegationsRequest{
-				ValidatorAddr: myAddress.String(),
-				Pagination: &querytypes.PageRequest{
-					Limit: Limit,
+		var stakingRes interface{}
+		var err error
+
+		if NetworkType == "zenrock" {
+			client := validationClient.(ValidationClient)
+			stakingRes, err = client.ValidatorDelegations(
+				context.Background(),
+				&QueryValidatorDelegationsRequest{ValidatorAddr: myAddress.String()},
+			)
+		} else {
+			client := validationClient.(stakingtypes.QueryClient)
+			stakingRes, err = client.ValidatorDelegations(
+				context.Background(),
+				&stakingtypes.QueryValidatorDelegationsRequest{
+					ValidatorAddr: myAddress.String(),
+					Pagination: &querytypes.PageRequest{
+						Limit: Limit,
+					},
 				},
-			},
-		)
+			)
+		}
+
 		if err != nil {
 			sublogger.Error().
 				Str("address", address).
@@ -332,19 +344,33 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			Float64("request-time", time.Since(queryStart).Seconds()).
 			Msg("Finished querying validator delegations")
 
-		for _, delegation := range stakingRes.DelegationResponses {
-			if value, err := strconv.ParseFloat(delegation.Balance.Amount.String(), 64); err != nil {
-				log.Error().
-					Err(err).
-					Str("address", address).
-					Msg("Could not convert delegation entry")
-			} else {
+		if NetworkType == "zenrock" {
+			res := stakingRes.(*QueryValidatorDelegationsResponse)
+			for _, delegation := range res.DelegationResponses {
+				value, _ := strconv.ParseFloat(delegation.Balance.Amount, 64)
 				validatorDelegationsGauge.With(prometheus.Labels{
 					"moniker":      validator.Description.Moniker,
 					"address":      delegation.Delegation.ValidatorAddress,
 					"denom":        Denom,
 					"delegated_by": delegation.Delegation.DelegatorAddress,
 				}).Set(value / DenomCoefficient)
+			}
+		} else {
+			res := stakingRes.(*stakingtypes.QueryValidatorDelegationsResponse)
+			for _, delegation := range res.DelegationResponses {
+				if value, err := strconv.ParseFloat(delegation.Balance.Amount.String(), 64); err != nil {
+					log.Error().
+						Err(err).
+						Str("address", address).
+						Msg("Could not convert delegation entry")
+				} else {
+					validatorDelegationsGauge.With(prometheus.Labels{
+						"moniker":      validator.Description.Moniker,
+						"address":      delegation.Delegation.ValidatorAddress,
+						"denom":        Denom,
+						"delegated_by": delegation.Delegation.DelegatorAddress,
+					}).Set(value / DenomCoefficient)
+				}
 			}
 		}
 	}()

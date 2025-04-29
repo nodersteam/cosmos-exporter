@@ -15,18 +15,12 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
-)
-
-type NetworkType string
-
-const (
-	NetworkTypeCosmos  NetworkType = "cosmos"
-	NetworkTypeZenrock NetworkType = "zenrock"
 )
 
 var (
@@ -39,6 +33,7 @@ var (
 	LogLevel      string
 	JsonOutput    bool
 	Limit         uint64
+	NetworkType   string
 
 	Prefix                    string
 	AccountPrefix             string
@@ -52,9 +47,6 @@ var (
 	ConstLabels      map[string]string
 	DenomCoefficient float64
 	DenomExponent    uint64
-
-	NetworkTypeStr  string
-	NetworkTypeEnum NetworkType
 )
 
 var log = zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
@@ -174,38 +166,31 @@ func Execute(cmd *cobra.Command, args []string) {
 	setChainID()
 	setDenom(grpcConn)
 
-	// Определяем тип сети
-	NetworkTypeEnum = NetworkType(NetworkTypeStr)
-	if NetworkTypeEnum != NetworkTypeCosmos && NetworkTypeEnum != NetworkTypeZenrock {
-		log.Fatal().Str("network-type", NetworkTypeStr).Msg("Invalid network type")
-	}
-
-	// Создаем соответствующий клиент в зависимости от типа сети
-	if NetworkTypeEnum == NetworkTypeZenrock {
-		zenrockClient := NewZenrockValidationClient(grpcConn)
-		http.HandleFunc("/metrics/wallet", zenrockClient.HandleWallet)
-		http.HandleFunc("/metrics/validator", zenrockClient.HandleValidator)
-		http.HandleFunc("/metrics/validators", zenrockClient.HandleValidators)
+	var validationClient interface{}
+	if NetworkType == "zenrock" {
+		validationClient = NewValidationClient(grpcConn)
 	} else {
-		http.HandleFunc("/metrics/wallet", func(w http.ResponseWriter, r *http.Request) {
-			WalletHandler(w, r, grpcConn)
-		})
-
-		http.HandleFunc("/metrics/validator", func(w http.ResponseWriter, r *http.Request) {
-			ValidatorHandler(w, r, grpcConn)
-		})
-
-		http.HandleFunc("/metrics/validators", func(w http.ResponseWriter, r *http.Request) {
-			ValidatorsHandler(w, r, grpcConn)
-		})
+		validationClient = stakingtypes.NewQueryClient(grpcConn)
 	}
+
+	http.HandleFunc("/metrics/wallet", func(w http.ResponseWriter, r *http.Request) {
+		WalletHandler(w, r, grpcConn, validationClient)
+	})
+
+	http.HandleFunc("/metrics/validator", func(w http.ResponseWriter, r *http.Request) {
+		ValidatorHandler(w, r, grpcConn, validationClient)
+	})
+
+	http.HandleFunc("/metrics/validators", func(w http.ResponseWriter, r *http.Request) {
+		ValidatorsHandler(w, r, grpcConn, validationClient)
+	})
 
 	http.HandleFunc("/metrics/params", func(w http.ResponseWriter, r *http.Request) {
-		ParamsHandler(w, r, grpcConn)
+		ParamsHandler(w, r, grpcConn, validationClient)
 	})
 
 	http.HandleFunc("/metrics/general", func(w http.ResponseWriter, r *http.Request) {
-		GeneralHandler(w, r, grpcConn)
+		GeneralHandler(w, r, grpcConn, validationClient)
 	})
 
 	log.Info().Str("address", ListenAddress).Msg("Listening")
@@ -353,6 +338,7 @@ func main() {
 	rootCmd.PersistentFlags().Uint64Var(&Limit, "limit", 1000, "Pagination limit for gRPC requests")
 	rootCmd.PersistentFlags().StringVar(&TendermintRPC, "tendermint-rpc", "http://localhost:26657", "Tendermint RPC address")
 	rootCmd.PersistentFlags().BoolVar(&JsonOutput, "json", false, "Output logs as JSON")
+	rootCmd.PersistentFlags().StringVar(&NetworkType, "network-type", "cosmos", "Network type (cosmos or zenrock)")
 
 	rootCmd.PersistentFlags().StringVar(&Prefix, "bech-prefix", "persistence", "Bech32 global prefix")
 	rootCmd.PersistentFlags().StringVar(&AccountPrefix, "bech-account-prefix", "", "Bech32 account prefix")
@@ -361,8 +347,6 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&ValidatorPubkeyPrefix, "bech-validator-pubkey-prefix", "", "Bech32 pubkey validator prefix")
 	rootCmd.PersistentFlags().StringVar(&ConsensusNodePrefix, "bech-consensus-node-prefix", "", "Bech32 consensus node prefix")
 	rootCmd.PersistentFlags().StringVar(&ConsensusNodePubkeyPrefix, "bech-consensus-node-pubkey-prefix", "", "Bech32 pubkey consensus node prefix")
-
-	rootCmd.PersistentFlags().StringVar(&NetworkTypeStr, "network-type", "cosmos", "Network type (cosmos or zenrock)")
 
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal().Err(err).Msg("Could not start application")

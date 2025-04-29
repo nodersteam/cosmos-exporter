@@ -12,6 +12,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/cosmos/cosmos-sdk/types/anypb"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
@@ -20,7 +21,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn) {
+func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.ClientConn, validationClient interface{}) {
 	requestStart := time.Now()
 
 	sublogger := log.With().
@@ -131,15 +132,27 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		sublogger.Debug().Msg("Started querying validators")
 		queryStart := time.Now()
 
-		stakingClient := stakingtypes.NewQueryClient(grpcConn)
-		validatorsResponse, err := stakingClient.Validators(
-			context.Background(),
-			&stakingtypes.QueryValidatorsRequest{
-				Pagination: &querytypes.PageRequest{
-					Limit: Limit,
+		var validatorsResponse interface{}
+		var err error
+
+		if NetworkType == "zenrock" {
+			client := validationClient.(ValidationClient)
+			validatorsResponse, err = client.Validators(
+				context.Background(),
+				&QueryValidatorsRequest{},
+			)
+		} else {
+			client := validationClient.(stakingtypes.QueryClient)
+			validatorsResponse, err = client.Validators(
+				context.Background(),
+				&stakingtypes.QueryValidatorsRequest{
+					Pagination: &querytypes.PageRequest{
+						Limit: Limit,
+					},
 				},
-			},
-		)
+			)
+		}
+
 		if err != nil {
 			sublogger.Error().Err(err).Msg("Could not get validators")
 			return
@@ -148,7 +161,30 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		sublogger.Debug().
 			Float64("request-time", time.Since(queryStart).Seconds()).
 			Msg("Finished querying validators")
-		validators = validatorsResponse.Validators
+
+		if NetworkType == "zenrock" {
+			res := validatorsResponse.(*QueryValidatorsResponse)
+			validators = make([]stakingtypes.Validator, len(res.Validators))
+			for i, v := range res.Validators {
+				validators[i] = stakingtypes.Validator{
+					OperatorAddress: v.OperatorAddress,
+					ConsensusPubkey: &anypb.Any{
+						TypeUrl: "/cosmos.crypto.ed25519.PubKey",
+						Value:   []byte(v.ConsensusPubkey),
+					},
+					Jailed:          v.Jailed,
+					Status:          stakingtypes.BondStatus(stakingtypes.BondStatus_value[v.Status]),
+					Tokens:          sdk.NewIntFromString(v.Tokens),
+					DelegatorShares: sdk.NewDecFromStr(v.DelegatorShares),
+					Description: stakingtypes.Description{
+						Moniker: v.Description.Moniker,
+					},
+				}
+			}
+		} else {
+			res := validatorsResponse.(*stakingtypes.QueryValidatorsResponse)
+			validators = res.Validators
+		}
 
 		sort.Slice(validators, func(i, j int) bool {
 			return validators[i].DelegatorShares.GT(validators[j].DelegatorShares)
