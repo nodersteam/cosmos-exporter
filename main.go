@@ -15,7 +15,6 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
-	"github.com/noders-team/cosmos-exporter/zenrock/validation"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -23,9 +22,15 @@ import (
 	"github.com/spf13/viper"
 )
 
+type NetworkType string
+
+const (
+	NetworkTypeCosmos  NetworkType = "cosmos"
+	NetworkTypeZenrock NetworkType = "zenrock"
+)
+
 var (
-	ConfigPath  string
-	ServicePath string
+	ConfigPath string
 
 	Denom         string
 	ListenAddress string
@@ -34,14 +39,6 @@ var (
 	LogLevel      string
 	JsonOutput    bool
 	Limit         uint64
-
-	// Список возможных путей к сервису
-	possibleServicePaths = []string{
-		"cosmos.staking.v1beta1.Query",
-		"zrchain.validation.Query",
-		"cosmos.staking.v1beta1.QueryService",
-		"staking.Query",
-	}
 
 	Prefix                    string
 	AccountPrefix             string
@@ -55,6 +52,9 @@ var (
 	ConstLabels      map[string]string
 	DenomCoefficient float64
 	DenomExponent    uint64
+
+	NetworkTypeStr  string
+	NetworkTypeEnum NetworkType
 )
 
 var log = zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().Timestamp().Logger()
@@ -129,29 +129,6 @@ func setBechPrefixes(cmd *cobra.Command) {
 	}
 }
 
-// findWorkingServicePath пытается найти работающий путь к сервису
-func findWorkingServicePath(conn *grpc.ClientConn) (string, error) {
-	for _, path := range possibleServicePaths {
-		log.Info().Str("path", path).Msg("Trying service path")
-
-		// Создаем временный клиент для проверки
-		client := validation.NewClient(conn)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		// Пробуем получить параметры стейкинга
-		_, err := client.Params(ctx)
-		if err == nil {
-			log.Info().Str("path", path).Msg("Found working service path")
-			return path, nil
-		}
-
-		log.Debug().Str("path", path).Err(err).Msg("Service path not working")
-	}
-
-	return "", fmt.Errorf("could not find working service path")
-}
-
 func Execute(cmd *cobra.Command, args []string) {
 	logLevel, err := zerolog.ParseLevel(LogLevel)
 	if err != nil {
@@ -188,44 +165,6 @@ func Execute(cmd *cobra.Command, args []string) {
 	grpcConn, err := grpc.Dial(
 		NodeAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
-	)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Could not connect to gRPC node")
-	}
-	defer grpcConn.Close()
-
-	if ConfigPath != "" {
-		viper.SetConfigFile(ConfigPath)
-		if err := viper.ReadInConfig(); err != nil {
-			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-				log.Info().Err(err).Msg("Error reading config file")
-				return
-			}
-		}
-
-		// Загружаем дополнительные пути из конфига
-		if additionalPaths := viper.GetStringSlice("service_paths"); len(additionalPaths) > 0 {
-			possibleServicePaths = append(possibleServicePaths, additionalPaths...)
-		}
-	}
-
-	// Если путь к сервису не указан, пробуем найти его автоматически
-	if ServicePath == "" {
-		path, err := findWorkingServicePath(grpcConn)
-		if err != nil {
-			log.Fatal().Err(err).Msg("Could not find working service path")
-		}
-		ServicePath = path
-	}
-
-	// Закрываем текущее соединение и создаем новое с правильным путем
-	grpcConn.Close()
-	grpcConn, err = grpc.Dial(
-		NodeAddress,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
-		grpc.WithAuthority(ServicePath),
 	)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Could not connect to gRPC node")
@@ -235,17 +174,31 @@ func Execute(cmd *cobra.Command, args []string) {
 	setChainID()
 	setDenom(grpcConn)
 
-	http.HandleFunc("/metrics/wallet", func(w http.ResponseWriter, r *http.Request) {
-		WalletHandler(w, r, grpcConn)
-	})
+	// Определяем тип сети
+	NetworkTypeEnum = NetworkType(NetworkTypeStr)
+	if NetworkTypeEnum != NetworkTypeCosmos && NetworkTypeEnum != NetworkTypeZenrock {
+		log.Fatal().Str("network-type", NetworkTypeStr).Msg("Invalid network type")
+	}
 
-	http.HandleFunc("/metrics/validator", func(w http.ResponseWriter, r *http.Request) {
-		ValidatorHandler(w, r, grpcConn)
-	})
+	// Создаем соответствующий клиент в зависимости от типа сети
+	if NetworkTypeEnum == NetworkTypeZenrock {
+		zenrockClient := NewZenrockValidationClient(grpcConn)
+		http.HandleFunc("/metrics/wallet", zenrockClient.HandleWallet)
+		http.HandleFunc("/metrics/validator", zenrockClient.HandleValidator)
+		http.HandleFunc("/metrics/validators", zenrockClient.HandleValidators)
+	} else {
+		http.HandleFunc("/metrics/wallet", func(w http.ResponseWriter, r *http.Request) {
+			WalletHandler(w, r, grpcConn)
+		})
 
-	http.HandleFunc("/metrics/validators", func(w http.ResponseWriter, r *http.Request) {
-		ValidatorsHandler(w, r, grpcConn)
-	})
+		http.HandleFunc("/metrics/validator", func(w http.ResponseWriter, r *http.Request) {
+			ValidatorHandler(w, r, grpcConn)
+		})
+
+		http.HandleFunc("/metrics/validators", func(w http.ResponseWriter, r *http.Request) {
+			ValidatorsHandler(w, r, grpcConn)
+		})
+	}
 
 	http.HandleFunc("/metrics/params", func(w http.ResponseWriter, r *http.Request) {
 		ParamsHandler(w, r, grpcConn)
@@ -391,7 +344,6 @@ func checkAndHandleDenomInfoProvidedByUser() bool {
 
 func main() {
 	rootCmd.PersistentFlags().StringVar(&ConfigPath, "config", "", "Config file path")
-	rootCmd.PersistentFlags().StringVar(&ServicePath, "service-path", "", "gRPC service path")
 	rootCmd.PersistentFlags().StringVar(&Denom, "denom", "", "Cosmos coin denom")
 	rootCmd.PersistentFlags().Float64Var(&DenomCoefficient, "denom-coefficient", 1, "Denom coefficient")
 	rootCmd.PersistentFlags().Uint64Var(&DenomExponent, "denom-exponent", 0, "Denom exponent")
@@ -409,6 +361,8 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&ValidatorPubkeyPrefix, "bech-validator-pubkey-prefix", "", "Bech32 pubkey validator prefix")
 	rootCmd.PersistentFlags().StringVar(&ConsensusNodePrefix, "bech-consensus-node-prefix", "", "Bech32 consensus node prefix")
 	rootCmd.PersistentFlags().StringVar(&ConsensusNodePubkeyPrefix, "bech-consensus-node-pubkey-prefix", "", "Bech32 pubkey consensus node prefix")
+
+	rootCmd.PersistentFlags().StringVar(&NetworkTypeStr, "network-type", "cosmos", "Network type (cosmos or zenrock)")
 
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal().Err(err).Msg("Could not start application")
