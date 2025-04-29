@@ -6,7 +6,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Client wraps the validation QueryClient
+// Client wraps the QueryClient
 type Client struct {
 	queryClient QueryClient
 }
