@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"math/big"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
+	"cosmossdk.io/math"
 	"google.golang.org/grpc"
 
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
@@ -27,16 +29,16 @@ func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Clien
 
 	generalBondedTokensGauge := prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Name:        "cosmos_general_bonded_tokens",
-			Help:        "Bonded tokens",
+			Name:        "cosmos_pool_bonded_tokens",
+			Help:        "Bonded tokens in the Cosmos-based blockchain pool",
 			ConstLabels: ConstLabels,
 		},
 	)
 
 	generalNotBondedTokensGauge := prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Name:        "cosmos_general_not_bonded_tokens",
-			Help:        "Not bonded tokens",
+			Name:        "cosmos_pool_not_bonded_tokens",
+			Help:        "Not bonded tokens in the Cosmos-based blockchain pool",
 			ConstLabels: ConstLabels,
 		},
 	)
@@ -92,25 +94,25 @@ func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Clien
 		sublogger.Debug().Msg("Started querying staking pool")
 		queryStart := time.Now()
 
-		var response interface{}
+		var res interface{}
 		var err error
 
 		if NetworkType == "zenrock" {
 			client := validationClient.(ValidationClient)
-			response, err = client.Pool(
+			res, err = client.Pool(
 				context.Background(),
 				&QueryPoolRequest{},
 			)
 		} else {
 			client := validationClient.(stakingtypes.QueryClient)
-			response, err = client.Pool(
+			res, err = client.Pool(
 				context.Background(),
 				&stakingtypes.QueryPoolRequest{},
 			)
 		}
 
 		if err != nil {
-			sublogger.Error().Err(err).Msg("Could not get staking pool")
+			sublogger.Error().Err(err).Msg("Could not get pool")
 			return
 		}
 
@@ -118,15 +120,22 @@ func GeneralHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Clien
 			Float64("request-time", time.Since(queryStart).Seconds()).
 			Msg("Finished querying staking pool")
 
+		var bondedTokens, notBondedTokens math.Int
 		if NetworkType == "zenrock" {
-			res := response.(*QueryPoolResponse)
-			generalBondedTokensGauge.Set(float64(res.Pool.BondedTokens))
-			generalNotBondedTokensGauge.Set(float64(res.Pool.NotBondedTokens))
+			poolRes := res.(*QueryPoolResponse)
+			bondedTokens, _ = math.NewIntFromString(poolRes.Pool.BondedTokens)
+			notBondedTokens, _ = math.NewIntFromString(poolRes.Pool.NotBondedTokens)
 		} else {
-			res := response.(*stakingtypes.QueryPoolResponse)
-			generalBondedTokensGauge.Set(float64(res.Pool.BondedTokens.Int64()))
-			generalNotBondedTokensGauge.Set(float64(res.Pool.NotBondedTokens.Int64()))
+			poolRes := res.(*stakingtypes.QueryPoolResponse)
+			bondedTokens = poolRes.Pool.BondedTokens
+			notBondedTokens = poolRes.Pool.NotBondedTokens
 		}
+
+		bondedFloat, _ := new(big.Float).SetInt(bondedTokens.BigInt()).Float64()
+		notBondedFloat, _ := new(big.Float).SetInt(notBondedTokens.BigInt()).Float64()
+
+		generalBondedTokensGauge.Set(bondedFloat / DenomCoefficient)
+		generalNotBondedTokensGauge.Set(notBondedFloat / DenomCoefficient)
 	}()
 
 	wg.Add(1)
