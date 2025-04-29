@@ -24,6 +24,12 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Реестр кастомных сетей
+var customNetworks = map[string]string{
+	"diamond-1": "zenrock",
+	// Здесь можно добавить другие кастомные сети
+}
+
 var (
 	ConfigPath string
 
@@ -123,6 +129,12 @@ func setBechPrefixes(cmd *cobra.Command) {
 }
 
 func determineNetworkType(grpcConn *grpc.ClientConn) (string, error) {
+	// Сначала проверяем chain_id в реестре кастомных сетей
+	if networkType, ok := customNetworks[ChainID]; ok {
+		log.Info().Str("chain_id", ChainID).Str("network_type", networkType).Msg("Network type determined by chain_id")
+		return networkType, nil
+	}
+
 	// Создаем контекст с таймаутом
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -158,11 +170,6 @@ func determineNetworkType(grpcConn *grpc.ClientConn) (string, error) {
 		return "zenrock", nil
 	}
 	log.Debug().Err(err).Msg("Failed to get validation params")
-
-	// Если ничего не сработало, проверяем chain_id
-	if ChainID == "diamond-1" {
-		return "zenrock", nil
-	}
 
 	return "", fmt.Errorf("не удалось определить тип сети")
 }
