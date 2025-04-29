@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"google.golang.org/grpc"
@@ -111,8 +112,16 @@ func exportValidatorMetrics(w http.ResponseWriter, validator *QueryValidatorResp
 	})
 
 	// Set metric values
-	tokens, _ := validator.Validator.Tokens.BigInt().Float64()
-	commission := validator.Validator.Commission.CommissionRates.Rate.MustFloat64()
+	tokens, err := strconv.ParseFloat(validator.Validator.Tokens, 64)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to parse validator tokens")
+		return
+	}
+	commission, err := strconv.ParseFloat(validator.Validator.Commission.CommissionRates.Rate, 64)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to parse validator commission")
+		return
+	}
 	validatorPower.Set(tokens)
 	validatorCommission.Set(commission)
 	validatorDelegations.Set(float64(len(delegations.DelegationResponses)))
@@ -138,7 +147,11 @@ func exportValidatorsMetrics(w http.ResponseWriter, validators *QueryValidatorsR
 	// Calculate total power
 	var totalPower float64
 	for _, v := range validators.Validators {
-		power, _ := v.Tokens.BigInt().Float64()
+		power, err := strconv.ParseFloat(v.Tokens, 64)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to parse validator tokens")
+			continue
+		}
 		totalPower += power
 	}
 
