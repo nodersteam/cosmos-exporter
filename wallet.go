@@ -4,12 +4,14 @@ import (
 	"context"
 	"math/big"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/query"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
@@ -145,7 +147,12 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			client := validationClient.(stakingtypes.QueryClient)
 			stakingRes, err = client.DelegatorDelegations(
 				context.Background(),
-				&stakingtypes.QueryDelegatorDelegationsRequest{DelegatorAddr: myAddress.String()},
+				&stakingtypes.QueryDelegatorDelegationsRequest{
+					DelegatorAddr: myAddress.String(),
+					Pagination: &query.PageRequest{
+						Limit: Limit,
+					},
+				},
 			)
 		}
 
@@ -162,22 +169,20 @@ func WalletHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Client
 			Float64("request-time", time.Since(queryStart).Seconds()).
 			Msg("Finished querying delegations")
 
-		// Обработка ответа в зависимости от типа сети
 		if NetworkType == "zenrock" {
 			res := stakingRes.(*QueryDelegatorDelegationsResponse)
 			for _, delegation := range res.DelegationResponses {
-				value, _ := new(big.Float).SetString(delegation.Balance.Amount)
-				floatValue, _ := value.Float64()
+				value, _ := strconv.ParseFloat(delegation.Balance.Amount, 64)
 				walletDelegationGauge.With(prometheus.Labels{
 					"address":      address,
 					"denom":        delegation.Balance.Denom,
 					"delegated_to": delegation.Delegation.ValidatorAddress,
-				}).Set(floatValue / DenomCoefficient)
+				}).Set(value / DenomCoefficient)
 			}
 		} else {
 			res := stakingRes.(*stakingtypes.QueryDelegatorDelegationsResponse)
 			for _, delegation := range res.DelegationResponses {
-				value, _ := new(big.Float).SetInt(delegation.Balance.Amount.BigInt()).Float64()
+				value, _ := strconv.ParseFloat(delegation.Balance.Amount.String(), 64)
 				walletDelegationGauge.With(prometheus.Labels{
 					"address":      address,
 					"denom":        delegation.Balance.Denom,

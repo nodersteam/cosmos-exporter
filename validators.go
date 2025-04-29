@@ -5,13 +5,12 @@ import (
 	"context"
 	"math/big"
 	"net/http"
-	"sort"
+	"strconv"
 	"sync"
 	"time"
 	"unicode/utf8"
 
 	"cosmossdk.io/math"
-	"github.com/cosmos/cosmos-sdk/codec/types"
 	"google.golang.org/grpc"
 
 	"github.com/cosmos/cosmos-sdk/types/query"
@@ -193,45 +192,75 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 
 		if NetworkType == "zenrock" {
 			res := validatorsResponse.(*QueryValidatorsResponse)
-			validators = make([]stakingtypes.Validator, len(res.Validators))
-			for i, v := range res.Validators {
-				anyPubKey := &types.Any{
-					TypeUrl: "/cosmos.crypto.ed25519.PubKey",
-					Value:   []byte(v.ConsensusPubkey),
+			for _, validator := range res.Validators {
+				value, _ := strconv.ParseFloat(validator.Tokens, 64)
+				validatorsTokensGauge.With(prometheus.Labels{
+					"moniker": validator.Description.Moniker,
+					"address": validator.OperatorAddress,
+					"denom":   Denom,
+				}).Set(value / DenomCoefficient)
+
+				value, _ = strconv.ParseFloat(validator.DelegatorShares, 64)
+				validatorsDelegatorSharesGauge.With(prometheus.Labels{
+					"moniker": validator.Description.Moniker,
+					"address": validator.OperatorAddress,
+					"denom":   Denom,
+				}).Set(value / DenomCoefficient)
+
+				validatorsJailedGauge.With(prometheus.Labels{
+					"moniker": validator.Description.Moniker,
+					"address": validator.OperatorAddress,
+				}).Set(0)
+
+				if validator.Jailed {
+					validatorsJailedGauge.With(prometheus.Labels{
+						"moniker": validator.Description.Moniker,
+						"address": validator.OperatorAddress,
+					}).Set(1)
 				}
 
-				tokens, ok := math.NewIntFromString(v.Tokens)
-				if !ok {
-					sublogger.Error().Msg("Failed to parse tokens")
-					continue
-				}
-
-				delegatorShares, err := math.LegacyNewDecFromStr(v.DelegatorShares)
-				if err != nil {
-					sublogger.Error().Err(err).Msg("Failed to parse delegator shares")
-					continue
-				}
-
-				validators[i] = stakingtypes.Validator{
-					OperatorAddress: v.OperatorAddress,
-					ConsensusPubkey: anyPubKey,
-					Jailed:          v.Jailed,
-					Status:          stakingtypes.BondStatus(stakingtypes.BondStatus_value[v.Status]),
-					Tokens:          tokens,
-					DelegatorShares: delegatorShares,
-					Description: stakingtypes.Description{
-						Moniker: v.Description.Moniker,
-					},
-				}
+				validatorsStatusGauge.With(prometheus.Labels{
+					"moniker": validator.Description.Moniker,
+					"address": validator.OperatorAddress,
+					"status":  validator.Status,
+				}).Set(1)
 			}
 		} else {
 			res := validatorsResponse.(*stakingtypes.QueryValidatorsResponse)
-			validators = res.Validators
-		}
+			for _, validator := range res.Validators {
+				value, _ := strconv.ParseFloat(validator.Tokens.String(), 64)
+				validatorsTokensGauge.With(prometheus.Labels{
+					"moniker": validator.Description.Moniker,
+					"address": validator.OperatorAddress,
+					"denom":   Denom,
+				}).Set(value / DenomCoefficient)
 
-		sort.Slice(validators, func(i, j int) bool {
-			return validators[i].DelegatorShares.GT(validators[j].DelegatorShares)
-		})
+				value, _ = strconv.ParseFloat(validator.DelegatorShares.String(), 64)
+				validatorsDelegatorSharesGauge.With(prometheus.Labels{
+					"moniker": validator.Description.Moniker,
+					"address": validator.OperatorAddress,
+					"denom":   Denom,
+				}).Set(value / DenomCoefficient)
+
+				validatorsJailedGauge.With(prometheus.Labels{
+					"moniker": validator.Description.Moniker,
+					"address": validator.OperatorAddress,
+				}).Set(0)
+
+				if validator.Jailed {
+					validatorsJailedGauge.With(prometheus.Labels{
+						"moniker": validator.Description.Moniker,
+						"address": validator.OperatorAddress,
+					}).Set(1)
+				}
+
+				validatorsStatusGauge.With(prometheus.Labels{
+					"moniker": validator.Description.Moniker,
+					"address": validator.OperatorAddress,
+					"status":  validator.Status.String(),
+				}).Set(1)
+			}
+		}
 	}()
 
 	wg.Add(1)
