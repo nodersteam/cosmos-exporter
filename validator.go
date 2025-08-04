@@ -12,7 +12,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
-	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
@@ -498,8 +497,9 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			
 			// Попытка ручной десериализации ConsensusPubkey
 			if validator.ConsensusPubkey != nil && validator.ConsensusPubkey.TypeUrl == "/cosmos.crypto.ed25519.PubKey" {
-				var ed25519PubKey ed25519.PubKey
-				err := proto.Unmarshal(validator.ConsensusPubkey.Value, &ed25519PubKey)
+				// Создаем новый ed25519 ключ и десериализуем в него
+				ed25519PubKey := &ed25519.PubKey{}
+				err := proto.Unmarshal(validator.ConsensusPubkey.Value, ed25519PubKey)
 				if err != nil {
 					sublogger.Error().
 						Str("address", validator.OperatorAddress).
