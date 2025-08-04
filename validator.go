@@ -497,14 +497,10 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			
 			// Попытка ручной десериализации ConsensusPubkey
 			if validator.ConsensusPubkey != nil && validator.ConsensusPubkey.TypeUrl == "/cosmos.crypto.ed25519.PubKey" {
-				// Пробуем создать ed25519 ключ напрямую из bytes
-				ed25519PubKey := &ed25519.PubKey{}
-				
 				// Проверяем, что у нас есть достаточно данных
 				if len(validator.ConsensusPubkey.Value) >= 34 {
 					// Пропускаем первые 2 байта (protobuf заголовок) и берем следующие 32 байта
 					keyData := validator.ConsensusPubkey.Value[2:34]
-					copy(ed25519PubKey.Key[:], keyData)
 					
 					// Добавляем отладочную информацию
 					sublogger.Debug().
@@ -513,6 +509,10 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 						Int("key_length", len(keyData)).
 						Str("key_data", fmt.Sprintf("%v", keyData)).
 						Msg("Attempting to create ed25519 pubkey")
+					
+					// Создаем ed25519 ключ через конструктор
+					ed25519PubKey := ed25519.PubKey{Key: [32]byte{}}
+					copy(ed25519PubKey.Key[:], keyData)
 					
 					// Получаем consensus address из десериализованного ключа
 					consAddr = ed25519PubKey.Address()
