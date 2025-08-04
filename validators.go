@@ -12,7 +12,10 @@ import (
 	"unicode/utf8"
 
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
+	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
@@ -286,33 +289,32 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 				Str("status", validator.Status.String()).
 				Bool("jailed", validator.Jailed).
 				Err(err).
-				Msg("Could not get validator consensus address via GetConsAddr(), trying alternative method")
+				Msg("Could not get validator consensus address via GetConsAddr(), trying manual deserialization")
 			
-			// Альтернативный подход: ищем signing info по operator address
-			var signingInfo slashingtypes.ValidatorSigningInfo
-			found := false
-			
-			// Пробуем найти signing info по operator address (может работать в некоторых сетях)
-			for _, signingInfoIterated := range signingInfos {
-				// Некоторые сети могут использовать operator address в signing info
-				if signingInfoIterated.Address == validator.OperatorAddress {
-					found = true
-					signingInfo = signingInfoIterated
-					break
+			// Попытка ручной десериализации ConsensusPubkey
+			if validator.ConsensusPubkey != nil && validator.ConsensusPubkey.TypeUrl == "/cosmos.crypto.ed25519.PubKey" {
+				var ed25519PubKey ed25519.PubKey
+				err := proto.Unmarshal(validator.ConsensusPubkey.Value, &ed25519PubKey)
+				if err != nil {
+					sublogger.Error().
+						Str("address", validator.OperatorAddress).
+						Str("moniker", moniker).
+						Err(err).
+						Msg("Failed to unmarshal ed25519 pubkey")
+				} else {
+					// Получаем consensus address из десериализованного ключа
+					consAddr = ed25519PubKey.Address()
+					sublogger.Debug().
+						Str("address", validator.OperatorAddress).
+						Str("moniker", moniker).
+						Msg("Successfully deserialized consensus pubkey manually")
 				}
 			}
 			
-			if !found {
-				sublogger.Debug().
-					Str("address", validator.OperatorAddress).
-					Msg("Could not find signing info for validator via alternative method")
-			} else if validator.Status == stakingtypes.Bonded {
-				validatorsMissedBlocksGauge.With(prometheus.Labels{
-					"address": validator.OperatorAddress,
-					"moniker": moniker,
-				}).Set(float64(signingInfo.MissedBlocksCounter))
-			}
-		} else {
+		}
+		
+		// Если у нас есть consensus address (полученный любым способом), ищем signing info
+		if consAddr != nil {
 			var signingInfo slashingtypes.ValidatorSigningInfo
 			found := false
 			for _, signingInfoIterated := range signingInfos {
