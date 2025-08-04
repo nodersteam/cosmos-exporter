@@ -258,38 +258,57 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 			"denom":   Denom,
 		}).Set(value / DenomCoefficient)
 
+		// Попытка получить консенсусный адрес для метрик пропущенных блоков
+		// Добавляем диагностику типа ключа
+		if validator.ConsensusPubkey == nil {
+			sublogger.Error().
+				Str("address", validator.OperatorAddress).
+				Str("moniker", moniker).
+				Str("status", validator.Status.String()).
+				Bool("jailed", validator.Jailed).
+				Msg("Validator consensus pubkey is nil, skipping missed blocks metrics")
+		} else {
+			sublogger.Debug().
+				Str("address", validator.OperatorAddress).
+				Str("moniker", moniker).
+				Str("pubkey_type", validator.ConsensusPubkey.TypeUrl).
+				Msg("Attempting to get consensus address")
+		}
+		
 		consAddr, err := validator.GetConsAddr()
 		if err != nil {
 			sublogger.Error().
 				Str("address", validator.OperatorAddress).
+				Str("moniker", moniker).
+				Str("status", validator.Status.String()).
+				Bool("jailed", validator.Jailed).
 				Err(err).
-				Msg("Could not get validator consensus address")
-			continue
-		}
-
-		var signingInfo slashingtypes.ValidatorSigningInfo
-		found := false
-		for _, signingInfoIterated := range signingInfos {
-			if bytes.Equal(consAddr, []byte(signingInfoIterated.Address)) {
-				found = true
-				signingInfo = signingInfoIterated
-				break
-			}
-		}
-
-		if !found {
-			sublogger.Debug().
-				Str("address", validator.OperatorAddress).
-				Msg("Could not get signing info for validator")
-		} else if validator.Status == stakingtypes.Bonded {
-			validatorsMissedBlocksGauge.With(prometheus.Labels{
-				"address": validator.OperatorAddress,
-				"moniker": moniker,
-			}).Set(float64(signingInfo.MissedBlocksCounter))
+				Msg("Could not get validator consensus address, skipping missed blocks metrics")
 		} else {
-			sublogger.Trace().
-				Str("address", validator.OperatorAddress).
-				Msg("Validator is not active, not returning missed blocks amount.")
+			var signingInfo slashingtypes.ValidatorSigningInfo
+			found := false
+			for _, signingInfoIterated := range signingInfos {
+				if bytes.Equal(consAddr, []byte(signingInfoIterated.Address)) {
+					found = true
+					signingInfo = signingInfoIterated
+					break
+				}
+			}
+
+			if !found {
+				sublogger.Debug().
+					Str("address", validator.OperatorAddress).
+					Msg("Could not get signing info for validator")
+			} else if validator.Status == stakingtypes.Bonded {
+				validatorsMissedBlocksGauge.With(prometheus.Labels{
+					"address": validator.OperatorAddress,
+					"moniker": moniker,
+				}).Set(float64(signingInfo.MissedBlocksCounter))
+			} else {
+				sublogger.Trace().
+					Str("address", validator.OperatorAddress).
+					Msg("Validator is not active, not returning missed blocks amount.")
+			}
 		}
 
 		validatorsRankGauge.With(prometheus.Labels{
