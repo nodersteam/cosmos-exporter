@@ -13,7 +13,6 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
@@ -293,33 +292,22 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 			
 			// Попытка ручной десериализации ConsensusPubkey
 			if validator.ConsensusPubkey != nil && validator.ConsensusPubkey.TypeUrl == "/cosmos.crypto.ed25519.PubKey" {
-				// Создаем anypb.Any и десериализуем в него
-				anyMsg := &anypb.Any{}
-				err := proto.Unmarshal(validator.ConsensusPubkey.Value, anyMsg)
-				if err != nil {
+				// Пробуем создать ed25519 ключ напрямую из bytes
+				ed25519PubKey := &ed25519.PubKey{}
+				// Копируем данные из protobuf Value в ключ
+				if len(validator.ConsensusPubkey.Value) >= 32 {
+					copy(ed25519PubKey.Key, validator.ConsensusPubkey.Value)
+					// Получаем consensus address из десериализованного ключа
+					consAddr = ed25519PubKey.Address()
+					sublogger.Debug().
+						Str("address", validator.OperatorAddress).
+						Str("moniker", moniker).
+						Msg("Successfully deserialized consensus pubkey manually")
+				} else {
 					sublogger.Error().
 						Str("address", validator.OperatorAddress).
 						Str("moniker", moniker).
-						Err(err).
-						Msg("Failed to unmarshal consensus pubkey to anypb.Any")
-				} else {
-					// Создаем ed25519 ключ из anypb.Any
-					ed25519PubKey := &ed25519.PubKey{}
-					err := anyMsg.UnmarshalTo(ed25519PubKey)
-					if err != nil {
-						sublogger.Error().
-							Str("address", validator.OperatorAddress).
-							Str("moniker", moniker).
-							Err(err).
-							Msg("Failed to unmarshal ed25519 pubkey from anypb.Any")
-					} else {
-						// Получаем consensus address из десериализованного ключа
-						consAddr = ed25519PubKey.Address()
-						sublogger.Debug().
-							Str("address", validator.OperatorAddress).
-							Str("moniker", moniker).
-							Msg("Successfully deserialized consensus pubkey manually")
-					}
+						Msg("Invalid ed25519 pubkey length")
 				}
 			}
 			
