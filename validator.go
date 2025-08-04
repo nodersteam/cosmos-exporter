@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -10,6 +12,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	cosmosed25519 "github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
@@ -485,13 +488,51 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			Str("address", address).
 			Msg("Started querying validator signing info")
 
+		// Попытка получить consensus address через GetConsAddr()
 		consAddr, err := validator.GetConsAddr()
 		if err != nil {
-			sublogger.Error().
+			sublogger.Debug().
 				Str("address", validator.OperatorAddress).
 				Err(err).
-				Msg("Could not get validator consensus address, skipping consensus metrics")
-		} else {
+				Msg("GetConsAddr() failed (known SDK bug), using custom deserialization")
+			
+			// Попытка ручной десериализации ConsensusPubkey
+			if validator.ConsensusPubkey != nil && validator.ConsensusPubkey.TypeUrl == "/cosmos.crypto.ed25519.PubKey" {
+				// Проверяем, что у нас есть достаточно данных
+				if len(validator.ConsensusPubkey.Value) >= 34 {
+					// Пропускаем первые 2 байта (protobuf заголовок) и берем следующие 32 байта
+					keyData := validator.ConsensusPubkey.Value[2:34]
+					
+					// Создаем ed25519 ключ через стандартный пакет
+					cosmosPubKey := cosmosed25519.PubKey{}
+					// Используем стандартный crypto/ed25519 для создания ключа
+					stdPubKey := ed25519.PublicKey(keyData)
+					cosmosPubKey.Key = stdPubKey
+					
+					// Получаем consensus address из десериализованного ключа
+					consAddr = cosmosPubKey.Address()
+					sublogger.Info().
+						Str("address", validator.OperatorAddress).
+						Str("consensus_addr", fmt.Sprintf("%x", consAddr)).
+						Msg("Successfully extracted consensus address via custom deserialization")
+				} else {
+					sublogger.Error().
+						Str("address", validator.OperatorAddress).
+						Int("length", len(validator.ConsensusPubkey.Value)).
+						Msg("Invalid ed25519 pubkey length")
+				}
+			}
+			
+			// Если ручная десериализация не удалась
+			if consAddr == nil {
+				sublogger.Warn().
+					Str("address", validator.OperatorAddress).
+					Msg("Failed to extract consensus address, skipping missed blocks metrics")
+			}
+		}
+		
+		// Если у нас есть consensus address (полученный любым способом), получаем signing info
+		if consAddr != nil {
 			slashingClient := slashingtypes.NewQueryClient(grpcConn)
 			slashingRes, err := slashingClient.SigningInfo(
 				context.Background(),
@@ -500,7 +541,8 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			if err != nil {
 				sublogger.Debug().
 					Str("address", validator.OperatorAddress).
-					Msg("Could not get signing info for validator")
+					Str("consensus_addr", fmt.Sprintf("%x", consAddr)).
+					Msg("No signing info found for validator (normal for inactive/jailed validators)")
 			} else if validator.Status == stakingtypes.Bonded {
 				validatorMissedBlocksGauge.With(prometheus.Labels{
 					"address": validator.OperatorAddress,

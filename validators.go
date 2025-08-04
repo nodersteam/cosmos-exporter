@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"fmt"
 	"math/big"
 	"net/http"
 	"sort"
@@ -12,6 +14,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	cosmosed25519 "github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
@@ -258,38 +261,94 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 			"denom":   Denom,
 		}).Set(value / DenomCoefficient)
 
-		consAddr, err := validator.GetConsAddr()
-		if err != nil {
+		// Попытка получить консенсусный адрес для метрик пропущенных блоков
+		// Добавляем детальную диагностику
+		if validator.ConsensusPubkey == nil {
 			sublogger.Error().
 				Str("address", validator.OperatorAddress).
-				Err(err).
-				Msg("Could not get validator consensus address")
-			continue
-		}
-
-		var signingInfo slashingtypes.ValidatorSigningInfo
-		found := false
-		for _, signingInfoIterated := range signingInfos {
-			if bytes.Equal(consAddr, []byte(signingInfoIterated.Address)) {
-				found = true
-				signingInfo = signingInfoIterated
-				break
-			}
-		}
-
-		if !found {
+				Str("moniker", moniker).
+				Str("status", validator.Status.String()).
+				Bool("jailed", validator.Jailed).
+				Msg("Validator consensus pubkey is nil, skipping missed blocks metrics")
+		} else {
 			sublogger.Debug().
 				Str("address", validator.OperatorAddress).
-				Msg("Could not get signing info for validator")
-		} else if validator.Status == stakingtypes.Bonded {
-			validatorsMissedBlocksGauge.With(prometheus.Labels{
-				"address": validator.OperatorAddress,
-				"moniker": moniker,
-			}).Set(float64(signingInfo.MissedBlocksCounter))
-		} else {
-			sublogger.Trace().
+				Str("moniker", moniker).
+				Str("pubkey_type", validator.ConsensusPubkey.TypeUrl).
+				Str("pubkey_value", fmt.Sprintf("%+v", validator.ConsensusPubkey)).
+				Msg("Attempting to get consensus address")
+		}
+		
+		// Попытка получить consensus address через GetConsAddr()
+		consAddr, err := validator.GetConsAddr()
+		if err != nil {
+			sublogger.Debug().
 				Str("address", validator.OperatorAddress).
-				Msg("Validator is not active, not returning missed blocks amount.")
+				Str("moniker", moniker).
+				Str("status", validator.Status.String()).
+				Bool("jailed", validator.Jailed).
+				Err(err).
+				Msg("GetConsAddr() failed (known SDK bug), using custom deserialization")
+			
+			// Попытка ручной десериализации ConsensusPubkey
+			if validator.ConsensusPubkey != nil && validator.ConsensusPubkey.TypeUrl == "/cosmos.crypto.ed25519.PubKey" {
+				// Проверяем, что у нас есть достаточно данных
+				if len(validator.ConsensusPubkey.Value) >= 34 {
+					// Пропускаем первые 2 байта (protobuf заголовок) и берем следующие 32 байта
+					keyData := validator.ConsensusPubkey.Value[2:34]
+					
+					// Создаем ed25519 ключ через стандартный пакет
+					cosmosPubKey := cosmosed25519.PubKey{}
+					// Используем стандартный crypto/ed25519 для создания ключа
+					stdPubKey := ed25519.PublicKey(keyData)
+					cosmosPubKey.Key = stdPubKey
+					
+					// Получаем consensus address из десериализованного ключа
+					consAddr = cosmosPubKey.Address()
+					sublogger.Info().
+						Str("address", validator.OperatorAddress).
+						Str("moniker", moniker).
+						Str("consensus_addr", fmt.Sprintf("%x", consAddr)).
+						Msg("Successfully extracted consensus address via custom deserialization")
+				} else {
+					sublogger.Error().
+						Str("address", validator.OperatorAddress).
+						Str("moniker", moniker).
+						Int("length", len(validator.ConsensusPubkey.Value)).
+						Msg("Invalid ed25519 pubkey length")
+				}
+			}
+			
+		}
+		
+		// Если у нас есть consensus address (полученный любым способом), ищем signing info
+		if consAddr != nil {
+			var signingInfo slashingtypes.ValidatorSigningInfo
+			found := false
+			for _, signingInfoIterated := range signingInfos {
+				if bytes.Equal(consAddr, []byte(signingInfoIterated.Address)) {
+					found = true
+					signingInfo = signingInfoIterated
+					break
+				}
+			}
+
+			if !found {
+				sublogger.Debug().
+					Str("address", validator.OperatorAddress).
+					Str("moniker", moniker).
+					Str("consensus_addr", fmt.Sprintf("%x", consAddr)).
+					Msg("No signing info found for validator (normal for inactive/jailed validators)")
+			} else if validator.Status == stakingtypes.Bonded {
+				validatorsMissedBlocksGauge.With(prometheus.Labels{
+					"address": validator.OperatorAddress,
+					"moniker": moniker,
+				}).Set(float64(signingInfo.MissedBlocksCounter))
+			} else {
+				sublogger.Trace().
+					Str("address", validator.OperatorAddress).
+					Msg("Validator is not active, not returning missed blocks amount.")
+			}
 		}
 
 		validatorsRankGauge.With(prometheus.Labels{
