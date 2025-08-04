@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
 	"net/http"
 	"sort"
@@ -259,7 +260,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		}).Set(value / DenomCoefficient)
 
 		// Попытка получить консенсусный адрес для метрик пропущенных блоков
-		// Добавляем диагностику типа ключа
+		// Добавляем детальную диагностику
 		if validator.ConsensusPubkey == nil {
 			sublogger.Error().
 				Str("address", validator.OperatorAddress).
@@ -272,9 +273,11 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 				Str("address", validator.OperatorAddress).
 				Str("moniker", moniker).
 				Str("pubkey_type", validator.ConsensusPubkey.TypeUrl).
+				Str("pubkey_value", fmt.Sprintf("%+v", validator.ConsensusPubkey)).
 				Msg("Attempting to get consensus address")
 		}
 		
+		// Попытка получить consensus address через GetConsAddr()
 		consAddr, err := validator.GetConsAddr()
 		if err != nil {
 			sublogger.Error().
@@ -283,7 +286,32 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 				Str("status", validator.Status.String()).
 				Bool("jailed", validator.Jailed).
 				Err(err).
-				Msg("Could not get validator consensus address, skipping missed blocks metrics")
+				Msg("Could not get validator consensus address via GetConsAddr(), trying alternative method")
+			
+			// Альтернативный подход: ищем signing info по operator address
+			var signingInfo slashingtypes.ValidatorSigningInfo
+			found := false
+			
+			// Пробуем найти signing info по operator address (может работать в некоторых сетях)
+			for _, signingInfoIterated := range signingInfos {
+				// Некоторые сети могут использовать operator address в signing info
+				if signingInfoIterated.Address == validator.OperatorAddress {
+					found = true
+					signingInfo = signingInfoIterated
+					break
+				}
+			}
+			
+			if !found {
+				sublogger.Debug().
+					Str("address", validator.OperatorAddress).
+					Msg("Could not find signing info for validator via alternative method")
+			} else if validator.Status == stakingtypes.Bonded {
+				validatorsMissedBlocksGauge.With(prometheus.Labels{
+					"address": validator.OperatorAddress,
+					"moniker": moniker,
+				}).Set(float64(signingInfo.MissedBlocksCounter))
+			}
 		} else {
 			var signingInfo slashingtypes.ValidatorSigningInfo
 			found := false

@@ -485,12 +485,30 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 			Str("address", address).
 			Msg("Started querying validator signing info")
 
+		// Попытка получить consensus address через GetConsAddr()
 		consAddr, err := validator.GetConsAddr()
 		if err != nil {
 			sublogger.Error().
 				Str("address", validator.OperatorAddress).
 				Err(err).
-				Msg("Could not get validator consensus address, skipping consensus metrics")
+				Msg("Could not get validator consensus address via GetConsAddr(), trying alternative method")
+			
+			// Альтернативный подход: попробуем получить signing info по operator address
+			slashingClient := slashingtypes.NewQueryClient(grpcConn)
+			slashingRes, err := slashingClient.SigningInfo(
+				context.Background(),
+				&slashingtypes.QuerySigningInfoRequest{ConsAddress: validator.OperatorAddress},
+			)
+			if err != nil {
+				sublogger.Debug().
+					Str("address", validator.OperatorAddress).
+					Msg("Could not get signing info for validator via alternative method")
+			} else if validator.Status == stakingtypes.Bonded {
+				validatorMissedBlocksGauge.With(prometheus.Labels{
+					"address": validator.OperatorAddress,
+					"moniker": validator.Description.Moniker,
+				}).Set(float64(slashingRes.ValSigningInfo.MissedBlocksCounter))
+			}
 		} else {
 			slashingClient := slashingtypes.NewQueryClient(grpcConn)
 			slashingRes, err := slashingClient.SigningInfo(
