@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"net/http"
 	"sort"
@@ -11,7 +12,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
+	cosmosed25519 "github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
 	distributiontypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
@@ -510,12 +511,12 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 						Str("key_data", fmt.Sprintf("%v", keyData)).
 						Msg("Attempting to create ed25519 pubkey")
 					
-					// Создаем ed25519 ключ через конструктор
-					ed25519PubKey := ed25519.PubKey{}
-					copy(ed25519PubKey.Key[:], keyData)
+					// Создаем ed25519 ключ через стандартный пакет
+					cosmosPubKey := cosmosed25519.PubKey{}
+					copy(cosmosPubKey.Key[:], keyData)
 					
 					// Получаем consensus address из десериализованного ключа
-					consAddr = ed25519PubKey.Address()
+					consAddr = cosmosPubKey.Address()
 					sublogger.Debug().
 						Str("address", validator.OperatorAddress).
 						Msg("Successfully deserialized consensus pubkey manually")
