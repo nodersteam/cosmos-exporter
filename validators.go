@@ -282,13 +282,13 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 		// Попытка получить consensus address через GetConsAddr()
 		consAddr, err := validator.GetConsAddr()
 		if err != nil {
-			sublogger.Error().
+			sublogger.Debug().
 				Str("address", validator.OperatorAddress).
 				Str("moniker", moniker).
 				Str("status", validator.Status.String()).
 				Bool("jailed", validator.Jailed).
 				Err(err).
-				Msg("Could not get validator consensus address via GetConsAddr(), trying manual deserialization")
+				Msg("GetConsAddr() failed (known SDK bug), using custom deserialization")
 			
 			// Попытка ручной десериализации ConsensusPubkey
 			if validator.ConsensusPubkey != nil && validator.ConsensusPubkey.TypeUrl == "/cosmos.crypto.ed25519.PubKey" {
@@ -296,15 +296,6 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 				if len(validator.ConsensusPubkey.Value) >= 34 {
 					// Пропускаем первые 2 байта (protobuf заголовок) и берем следующие 32 байта
 					keyData := validator.ConsensusPubkey.Value[2:34]
-					
-					// Добавляем отладочную информацию
-					sublogger.Debug().
-						Str("address", validator.OperatorAddress).
-						Str("moniker", moniker).
-						Int("original_length", len(validator.ConsensusPubkey.Value)).
-						Int("key_length", len(keyData)).
-						Str("key_data", fmt.Sprintf("%v", keyData)).
-						Msg("Attempting to create ed25519 pubkey")
 					
 					// Создаем ed25519 ключ через стандартный пакет
 					cosmosPubKey := cosmosed25519.PubKey{}
@@ -314,10 +305,11 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 					
 					// Получаем consensus address из десериализованного ключа
 					consAddr = cosmosPubKey.Address()
-					sublogger.Debug().
+					sublogger.Info().
 						Str("address", validator.OperatorAddress).
 						Str("moniker", moniker).
-						Msg("Successfully deserialized consensus pubkey manually")
+						Str("consensus_addr", fmt.Sprintf("%x", consAddr)).
+						Msg("Successfully extracted consensus address via custom deserialization")
 				} else {
 					sublogger.Error().
 						Str("address", validator.OperatorAddress).
@@ -344,7 +336,9 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 			if !found {
 				sublogger.Debug().
 					Str("address", validator.OperatorAddress).
-					Msg("Could not get signing info for validator")
+					Str("moniker", moniker).
+					Str("consensus_addr", fmt.Sprintf("%x", consAddr)).
+					Msg("No signing info found for validator (normal for inactive/jailed validators)")
 			} else if validator.Status == stakingtypes.Bonded {
 				validatorsMissedBlocksGauge.With(prometheus.Labels{
 					"address": validator.OperatorAddress,
