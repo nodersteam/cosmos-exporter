@@ -295,13 +295,9 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 				ed25519PubKey := &ed25519.PubKey{}
 				
 				// Проверяем, что у нас есть достаточно данных
-				if len(validator.ConsensusPubkey.Value) >= 32 {
-					// Пропускаем первые байты (возможно, protobuf заголовок) и берем только ключ
-					keyData := validator.ConsensusPubkey.Value
-					if len(keyData) > 32 {
-						// Если данных больше 32 байт, берем последние 32 байта
-						keyData = keyData[len(keyData)-32:]
-					}
+				if len(validator.ConsensusPubkey.Value) >= 34 {
+					// Пропускаем первые 2 байта (protobuf заголовок) и берем следующие 32 байта
+					keyData := validator.ConsensusPubkey.Value[2:34]
 					copy(ed25519PubKey.Key[:], keyData)
 					
 					// Получаем consensus address из десериализованного ключа
