@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"fmt"
 	"math/big"
 	"net/http"
