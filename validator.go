@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"net/http"
 	"sort"
@@ -512,7 +513,9 @@ func ValidatorHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cli
 					
 					// Создаем ed25519 ключ через стандартный пакет
 					cosmosPubKey := cosmosed25519.PubKey{}
-					copy(cosmosPubKey.Key[:], keyData)
+					// Используем стандартный crypto/ed25519 для создания ключа
+					stdPubKey := ed25519.PublicKey(keyData)
+					cosmosPubKey.Key = stdPubKey
 					
 					// Получаем consensus address из десериализованного ключа
 					consAddr = cosmosPubKey.Address()
