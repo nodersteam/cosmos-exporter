@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	sdk "github.com/cosmos/cosmos-sdk/types"
