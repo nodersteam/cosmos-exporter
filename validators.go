@@ -306,7 +306,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 						Msg("Attempting to create ed25519 pubkey")
 					
 					// Создаем ed25519 ключ через конструктор
-					ed25519PubKey := ed25519.PubKey{Key: [32]byte{}}
+					ed25519PubKey := ed25519.PubKey{}
 					copy(ed25519PubKey.Key[:], keyData)
 					
 					// Получаем consensus address из десериализованного ключа
