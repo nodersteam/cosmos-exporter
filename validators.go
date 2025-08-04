@@ -300,6 +300,15 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 					keyData := validator.ConsensusPubkey.Value[2:34]
 					copy(ed25519PubKey.Key[:], keyData)
 					
+					// Добавляем отладочную информацию
+					sublogger.Debug().
+						Str("address", validator.OperatorAddress).
+						Str("moniker", moniker).
+						Int("original_length", len(validator.ConsensusPubkey.Value)).
+						Int("key_length", len(keyData)).
+						Str("key_data", fmt.Sprintf("%v", keyData)).
+						Msg("Attempting to create ed25519 pubkey")
+					
 					// Получаем consensus address из десериализованного ключа
 					consAddr = ed25519PubKey.Address()
 					sublogger.Debug().
@@ -310,6 +319,7 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 					sublogger.Error().
 						Str("address", validator.OperatorAddress).
 						Str("moniker", moniker).
+						Int("length", len(validator.ConsensusPubkey.Value)).
 						Msg("Invalid ed25519 pubkey length")
 				}
 			}
