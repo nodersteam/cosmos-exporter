@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	querytypes "github.com/cosmos/cosmos-sdk/types/query"
@@ -293,9 +294,17 @@ func ValidatorsHandler(w http.ResponseWriter, r *http.Request, grpcConn *grpc.Cl
 			if validator.ConsensusPubkey != nil && validator.ConsensusPubkey.TypeUrl == "/cosmos.crypto.ed25519.PubKey" {
 				// Пробуем создать ed25519 ключ напрямую из bytes
 				ed25519PubKey := &ed25519.PubKey{}
-				// Копируем данные из protobuf Value в ключ
+				
+				// Проверяем, что у нас есть достаточно данных
 				if len(validator.ConsensusPubkey.Value) >= 32 {
-					copy(ed25519PubKey.Key, validator.ConsensusPubkey.Value)
+					// Пропускаем первые байты (возможно, protobuf заголовок) и берем только ключ
+					keyData := validator.ConsensusPubkey.Value
+					if len(keyData) > 32 {
+						// Если данных больше 32 байт, берем последние 32 байта
+						keyData = keyData[len(keyData)-32:]
+					}
+					copy(ed25519PubKey.Key[:], keyData)
+					
 					// Получаем consensus address из десериализованного ключа
 					consAddr = ed25519PubKey.Address()
 					sublogger.Debug().
